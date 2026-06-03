@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
+import json
 import os
 import uuid
 from typing import List
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import storage
@@ -122,6 +125,8 @@ async def run_annotation_batch(prompts: List[AnnotationRequest]) -> BatchAnnotat
                         progress.auto_unsafe += 1
                     else:
                         progress.human_review += 1
+                    if all_stage1_votes_provider_failed(result):
+                        progress.provider_failed += 1
                 else:
                     progress.failed += 1
                 return result
@@ -132,6 +137,17 @@ async def run_annotation_batch(prompts: List[AnnotationRequest]) -> BatchAnnotat
     raw_results = await asyncio.gather(*(run_one(prompt) for prompt in prompts))
     results = [result for result in raw_results if result is not None]
     return BatchAnnotationResponse(results=results, progress=progress)
+
+
+def all_stage1_votes_provider_failed(result: AnnotationResult) -> bool:
+    """Return whether every Stage 1 vote is a provider/parse failure."""
+
+    if not result.votes:
+        return False
+    return all(
+        vote.parse_error is not None or "provider_failure" in vote.policy_triggers
+        for vote in result.votes
+    )
 
 
 @app.get("/api/annotations", response_model=List[AnnotationResult])
@@ -173,6 +189,49 @@ async def export_labels(include_prompt_text: bool = Query(default=False)) -> Lis
     """Export labels, preferring human overrides."""
 
     return storage.export_labels(include_prompt_text=include_prompt_text)
+
+
+@app.get("/api/export-labels.csv")
+async def export_labels_csv(include_prompt_text: bool = Query(default=False)) -> Response:
+    """Export labels as CSV, preferring human overrides."""
+
+    labels = storage.export_labels(include_prompt_text=include_prompt_text)
+    csv_text = labels_to_csv(labels)
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="labels.csv"'},
+    )
+
+
+def labels_to_csv(labels: List[ExportedLabel]) -> str:
+    """Serialize exported labels to CSV."""
+
+    output = io.StringIO()
+    fieldnames = [
+        "prompt_id",
+        "prompt",
+        "label",
+        "label_source",
+        "confidence",
+        "unsafe_category",
+        "metadata",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for label in labels:
+        writer.writerow(
+            {
+                "prompt_id": label.prompt_id,
+                "prompt": label.prompt_text or "",
+                "label": label.label,
+                "label_source": label.label_source,
+                "confidence": "" if label.confidence is None else label.confidence,
+                "unsafe_category": label.unsafe_category,
+                "metadata": json.dumps(label.metadata, sort_keys=True),
+            }
+        )
+    return output.getvalue()
 
 
 @app.post("/api/evaluate", response_model=EvaluationMetrics)

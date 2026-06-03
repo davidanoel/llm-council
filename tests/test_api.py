@@ -1,7 +1,12 @@
+import csv
+import json
+from io import StringIO
+
 from fastapi.testclient import TestClient
 
 from backend import storage
 from backend.main import app
+from backend import main as backend_main
 
 
 def test_annotate_and_export_api(tmp_path, monkeypatch):
@@ -63,6 +68,7 @@ def test_batch_csv_annotation_with_mock_provider(tmp_path, monkeypatch):
     assert data["progress"]["completed"] == 2
     assert data["progress"]["auto_safe"] == 1
     assert data["progress"]["auto_unsafe"] == 1
+    assert data["progress"]["provider_failed"] == 0
     assert data["results"][0]["prompt_id"] == "p1"
     assert data["results"][0]["adjudication"]["final_label"] == "safe"
     assert data["results"][1]["adjudication"]["final_label"] == "unsafe"
@@ -93,5 +99,112 @@ def test_batch_with_progress_endpoint(tmp_path, monkeypatch):
         "auto_safe": 1,
         "auto_unsafe": 1,
         "human_review": 0,
+        "provider_failed": 0,
     }
     assert len(data["results"]) == 2
+
+
+def test_csv_export_headers_human_override_prompt_and_metadata(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MODEL_PROVIDER", "mock")
+    monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
+    client = TestClient(app)
+
+    client.post(
+        "/api/annotate",
+        json={
+            "prompt_id": "p1",
+            "prompt_text": 'Review "quoted" fraud analytics, safely.',
+            "metadata": {"dataset": "unit,csv", "nested": {"x": 1}},
+        },
+    )
+    client.post(
+        "/api/human-review",
+        json={
+            "prompt_id": "p1",
+            "label": "unsafe",
+            "unsafe_category": "phishing",
+            "reviewer": "analyst",
+            "rationale": "Override for test.",
+        },
+    )
+
+    response = client.get("/api/export-labels.csv?include_prompt_text=true")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    rows = list(csv.DictReader(StringIO(response.text)))
+    assert rows
+    assert list(rows[0].keys()) == [
+        "prompt_id",
+        "prompt",
+        "label",
+        "label_source",
+        "confidence",
+        "unsafe_category",
+        "metadata",
+    ]
+    assert rows[0]["prompt_id"] == "p1"
+    assert rows[0]["prompt"] == 'Review "quoted" fraud analytics, safely.'
+    assert rows[0]["label"] == "unsafe"
+    assert rows[0]["label_source"] == "human"
+    assert rows[0]["confidence"] == ""
+    assert rows[0]["unsafe_category"] == "phishing"
+    assert json.loads(rows[0]["metadata"]) == {"dataset": "unit,csv", "nested": {"x": 1}}
+
+
+def test_batch_provider_failure_counts_completed_human_review_and_provider_failed(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MODEL_PROVIDER", "internal")
+    monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/annotate/batch-with-progress",
+        json={"prompts": [{"prompt_id": "p1", "prompt_text": "Explain safe logging practices."}]},
+    )
+
+    assert response.status_code == 200
+    progress = response.json()["progress"]
+    assert progress["completed"] == 1
+    assert progress["failed"] == 0
+    assert progress["human_review"] == 1
+    assert progress["provider_failed"] == 1
+
+
+def test_batch_app_exception_counts_failed(monkeypatch):
+    async def broken_annotate(_prompt):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(backend_main, "annotate", broken_annotate)
+
+    client = TestClient(app)
+    result = client.post(
+        "/api/annotate/batch-with-progress",
+        json={"prompts": [{"prompt_id": "p1", "prompt_text": "anything"}]},
+    )
+
+    assert result.status_code == 200
+    progress = result.json()["progress"]
+    assert progress["completed"] == 0
+    assert progress["failed"] == 1
+    assert progress["provider_failed"] == 0
+
+
+def test_batch_ambiguous_prompt_counts_human_review_not_provider_failed(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MODEL_PROVIDER", "mock")
+    monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/annotate/batch-with-progress",
+        json={"prompts": [{"prompt_id": "p1", "prompt_text": "Run nmap against the internal company database."}]},
+    )
+
+    assert response.status_code == 200
+    progress = response.json()["progress"]
+    assert progress["completed"] == 1
+    assert progress["failed"] == 0
+    assert progress["human_review"] == 1
+    assert progress["provider_failed"] == 0

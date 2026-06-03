@@ -62,6 +62,13 @@
   border-color: #bfdbfe;
 }
 
+.alert.warning {
+  background: #fffbeb;
+  color: #92400e;
+  border-color: #fde68a;
+  margin-top: 12px;
+}
+
 .grid {
   display: grid;
   gap: 16px;
@@ -271,6 +278,10 @@ th {
 
 .output {
   margin-top: 12px;
+}
+
+.export-csv {
+  margin-left: 8px;
 }
 
 .metrics {

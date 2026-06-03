@@ -210,6 +210,26 @@ function App() {
     }
   }
 
+  async function exportCsv() {
+    setError('');
+    setStatus('Exporting CSV...');
+    try {
+      const blob = await api.exportLabelsCsv(true);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'labels.csv';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setStatus('CSV download started.');
+    } catch (err) {
+      setError(err.message);
+      setStatus('');
+    }
+  }
+
   async function runEvaluation() {
     setError('');
     setStatus('Evaluating labels...');
@@ -381,11 +401,17 @@ function App() {
           <textarea value={batchText} onChange={(event) => setBatchText(event.target.value)} rows={12} />
           <button type="button" onClick={runBatchAnnotation}>Run Batch</button>
           {batchSummary && <SummaryTable summary={batchSummary} />}
+          {batchSummary?.provider_failed > 0 && (
+            <div className="alert warning">
+              Some prompts were routed to human review because model provider calls failed.
+            </div>
+          )}
         </section>
 
         <section className="panel">
           <h2>Export</h2>
           <button type="button" onClick={exportLabels}>Export JSON</button>
+          <button type="button" className="secondary export-csv" onClick={exportCsv}>Export CSV</button>
           <textarea className="output" value={exportText} readOnly rows={16} placeholder="Exported labels appear here." />
         </section>
       </section>

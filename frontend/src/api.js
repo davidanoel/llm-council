@@ -67,6 +67,15 @@ export const api = {
     return request(`/api/export-labels?include_prompt_text=${includePromptText}`);
   },
 
+  async exportLabelsCsv(includePromptText = false) {
+    const response = await fetch(`${API_BASE}/api/export-labels.csv?include_prompt_text=${includePromptText}`);
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(detail || `Request failed: ${response.status}`);
+    }
+    return response.blob();
+  },
+
   evaluate(labels) {
     return request('/api/evaluate', {
       method: 'POST',

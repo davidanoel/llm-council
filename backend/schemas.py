@@ -50,6 +50,7 @@ class BatchProgress(BaseModel):
     auto_safe: int = 0
     auto_unsafe: int = 0
     human_review: int = 0
+    provider_failed: int = 0
 
 
 class BatchAnnotationResponse(BaseModel):
