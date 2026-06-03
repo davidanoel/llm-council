@@ -1,335 +1,224 @@
-"""3-stage LLM Council orchestration."""
-
-from typing import List, Dict, Any, Tuple
-from .openrouter import query_models_parallel, query_model
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
-
-
-async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
-    """
-    Stage 1: Collect individual responses from all council models.
-
-    Args:
-        user_query: The user's question
-
-    Returns:
-        List of dicts with 'model' and 'response' keys
-    """
-    messages = [{"role": "user", "content": user_query}]
-
-    # Query all models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
-
-    # Format results
-    stage1_results = []
-    for model, response in responses.items():
-        if response is not None:  # Only include successful responses
-            stage1_results.append({
-                "model": model,
-                "response": response.get('content', '')
-            })
-
-    return stage1_results
-
-
-async def stage2_collect_rankings(
-    user_query: str,
-    stage1_results: List[Dict[str, Any]]
-) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
-    """
-    Stage 2: Each model ranks the anonymized responses.
-
-    Args:
-        user_query: The original user query
-        stage1_results: Results from Stage 1
-
-    Returns:
-        Tuple of (rankings list, label_to_model mapping)
-    """
-    # Create anonymized labels for responses (Response A, Response B, etc.)
-    labels = [chr(65 + i) for i in range(len(stage1_results))]  # A, B, C, ...
-
-    # Create mapping from label to model name
-    label_to_model = {
-        f"Response {label}": result['model']
-        for label, result in zip(labels, stage1_results)
-    }
-
-    # Build the ranking prompt
-    responses_text = "\n\n".join([
-        f"Response {label}:\n{result['response']}"
-        for label, result in zip(labels, stage1_results)
-    ])
-
-    ranking_prompt = f"""You are evaluating different responses to the following question:
-
-Question: {user_query}
-
-Here are the responses from different models (anonymized):
-
-{responses_text}
-
-Your task:
-1. First, evaluate each response individually. For each response, explain what it does well and what it does poorly.
-2. Then, at the very end of your response, provide a final ranking.
-
-IMPORTANT: Your final ranking MUST be formatted EXACTLY as follows:
-- Start with the line "FINAL RANKING:" (all caps, with colon)
-- Then list the responses from best to worst as a numbered list
-- Each line should be: number, period, space, then ONLY the response label (e.g., "1. Response A")
-- Do not add any other text or explanations in the ranking section
-
-Example of the correct format for your ENTIRE response:
-
-Response A provides good detail on X but misses Y...
-Response B is accurate but lacks depth on Z...
-Response C offers the most comprehensive answer...
-
-FINAL RANKING:
-1. Response C
-2. Response A
-3. Response B
-
-Now provide your evaluation and ranking:"""
-
-    messages = [{"role": "user", "content": ranking_prompt}]
-
-    # Get rankings from all council models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
-
-    # Format results
-    stage2_results = []
-    for model, response in responses.items():
-        if response is not None:
-            full_text = response.get('content', '')
-            parsed = parse_ranking_from_text(full_text)
-            stage2_results.append({
-                "model": model,
-                "ranking": full_text,
-                "parsed_ranking": parsed
-            })
-
-    return stage2_results, label_to_model
-
-
-async def stage3_synthesize_final(
-    user_query: str,
-    stage1_results: List[Dict[str, Any]],
-    stage2_results: List[Dict[str, Any]]
-) -> Dict[str, Any]:
-    """
-    Stage 3: Chairman synthesizes final response.
-
-    Args:
-        user_query: The original user query
-        stage1_results: Individual model responses from Stage 1
-        stage2_results: Rankings from Stage 2
-
-    Returns:
-        Dict with 'model' and 'response' keys
-    """
-    # Build comprehensive context for chairman
-    stage1_text = "\n\n".join([
-        f"Model: {result['model']}\nResponse: {result['response']}"
-        for result in stage1_results
-    ])
-
-    stage2_text = "\n\n".join([
-        f"Model: {result['model']}\nRanking: {result['ranking']}"
-        for result in stage2_results
-    ])
-
-    chairman_prompt = f"""You are the Chairman of an LLM Council. Multiple AI models have provided responses to a user's question, and then ranked each other's responses.
-
-Original Question: {user_query}
-
-STAGE 1 - Individual Responses:
-{stage1_text}
-
-STAGE 2 - Peer Rankings:
-{stage2_text}
-
-Your task as Chairman is to synthesize all of this information into a single, comprehensive, accurate answer to the user's original question. Consider:
-- The individual responses and their insights
-- The peer rankings and what they reveal about response quality
-- Any patterns of agreement or disagreement
-
-Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
-
-    messages = [{"role": "user", "content": chairman_prompt}]
-
-    # Query the chairman model
-    response = await query_model(CHAIRMAN_MODEL, messages)
-
-    if response is None:
-        # Fallback if chairman fails
-        return {
-            "model": CHAIRMAN_MODEL,
-            "response": "Error: Unable to generate final synthesis."
-        }
-
-    return {
-        "model": CHAIRMAN_MODEL,
-        "response": response.get('content', '')
-    }
-
-
-def parse_ranking_from_text(ranking_text: str) -> List[str]:
-    """
-    Parse the FINAL RANKING section from the model's response.
-
-    Args:
-        ranking_text: The full text response from the model
-
-    Returns:
-        List of response labels in ranked order
-    """
-    import re
-
-    # Look for "FINAL RANKING:" section
-    if "FINAL RANKING:" in ranking_text:
-        # Extract everything after "FINAL RANKING:"
-        parts = ranking_text.split("FINAL RANKING:")
-        if len(parts) >= 2:
-            ranking_section = parts[1]
-            # Try to extract numbered list format (e.g., "1. Response A")
-            # This pattern looks for: number, period, optional space, "Response X"
-            numbered_matches = re.findall(r'\d+\.\s*Response [A-Z]', ranking_section)
-            if numbered_matches:
-                # Extract just the "Response X" part
-                return [re.search(r'Response [A-Z]', m).group() for m in numbered_matches]
-
-            # Fallback: Extract all "Response X" patterns in order
-            matches = re.findall(r'Response [A-Z]', ranking_section)
-            return matches
-
-    # Fallback: try to find any "Response X" patterns in order
-    matches = re.findall(r'Response [A-Z]', ranking_text)
-    return matches
-
-
-def calculate_aggregate_rankings(
-    stage2_results: List[Dict[str, Any]],
-    label_to_model: Dict[str, str]
-) -> List[Dict[str, Any]]:
-    """
-    Calculate aggregate rankings across all models.
-
-    Args:
-        stage2_results: Rankings from each model
-        label_to_model: Mapping from anonymous labels to model names
-
-    Returns:
-        List of dicts with model name and average rank, sorted best to worst
-    """
-    from collections import defaultdict
-
-    # Track positions for each model
-    model_positions = defaultdict(list)
-
-    for ranking in stage2_results:
-        ranking_text = ranking['ranking']
-
-        # Parse the ranking from the structured format
-        parsed_ranking = parse_ranking_from_text(ranking_text)
-
-        for position, label in enumerate(parsed_ranking, start=1):
-            if label in label_to_model:
-                model_name = label_to_model[label]
-                model_positions[model_name].append(position)
-
-    # Calculate average position for each model
-    aggregate = []
-    for model, positions in model_positions.items():
-        if positions:
-            avg_rank = sum(positions) / len(positions)
-            aggregate.append({
-                "model": model,
-                "average_rank": round(avg_rank, 2),
-                "rankings_count": len(positions)
-            })
-
-    # Sort by average rank (lower is better)
-    aggregate.sort(key=lambda x: x['average_rank'])
-
-    return aggregate
-
-
-async def generate_conversation_title(user_query: str) -> str:
-    """
-    Generate a short title for a conversation based on the first user message.
-
-    Args:
-        user_query: The first user message
-
-    Returns:
-        A short title (3-5 words)
-    """
-    title_prompt = f"""Generate a very short title (3-5 words maximum) that summarizes the following question.
-The title should be concise and descriptive. Do not use quotes or punctuation in the title.
-
-Question: {user_query}
-
-Title:"""
-
-    messages = [{"role": "user", "content": title_prompt}]
-
-    # Use gemini-2.5-flash for title generation (fast and cheap)
-    response = await query_model("google/gemini-2.5-flash", messages, timeout=30.0)
-
-    if response is None:
-        # Fallback to a generic title
-        return "New Conversation"
-
-    title = response.get('content', 'New Conversation').strip()
-
-    # Clean up the title - remove quotes, limit length
-    title = title.strip('"\'')
-
-    # Truncate if too long
-    if len(title) > 50:
-        title = title[:47] + "..."
-
-    return title
-
-
-async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
-    """
-    Run the complete 3-stage council process.
-
-    Args:
-        user_query: The user's question
-
-    Returns:
-        Tuple of (stage1_results, stage2_results, stage3_result, metadata)
-    """
-    # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query)
-
-    # If no models responded successfully, return error
-    if not stage1_results:
-        return [], [], {
-            "model": "error",
-            "response": "All models failed to respond. Please try again."
-        }, {}
-
-    # Stage 2: Collect rankings
-    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
-
-    # Calculate aggregate rankings
-    aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-
-    # Stage 3: Synthesize final answer
-    stage3_result = await stage3_synthesize_final(
-        user_query,
-        stage1_results,
-        stage2_results
+"""Three-stage cybersecurity annotation council."""
+
+from __future__ import annotations
+
+import asyncio
+from collections import Counter
+from typing import Any, Dict, List, Optional
+
+from .model_provider import get_adjudicator_model, get_council_models, get_provider
+from .policy import HIGH_SEVERITY_UNSAFE_CATEGORIES
+from .schemas import CouncilAdjudication, ModelVote, PeerCritique
+
+
+AUTO_SAFE_THRESHOLD = 0.8
+AUTO_UNSAFE_THRESHOLD = 0.75
+AUTO_SAFE_CONFIDENCE = AUTO_SAFE_THRESHOLD
+AUTO_UNSAFE_CONFIDENCE = AUTO_UNSAFE_THRESHOLD
+LOW_CONFIDENCE = 0.6
+
+
+async def stage1_collect_votes(prompt_id: str, prompt_text: str, metadata: Optional[Dict[str, Any]] = None) -> List[ModelVote]:
+    """Collect independent model votes for one prompt."""
+
+    provider = get_provider()
+    tasks = [
+        provider.annotate(prompt_id, prompt_text, model_name, metadata)
+        for model_name in get_council_models()
+    ]
+    return list(await asyncio.gather(*tasks))
+
+
+async def stage2_collect_critiques(prompt_text: str, votes: List[ModelVote]) -> List[PeerCritique]:
+    """Collect peer critiques over anonymized votes without model ranking."""
+
+    provider = get_provider()
+    anonymized_votes = [
+        vote.model_copy(update={"model_name": f"Model {index + 1}"})
+        for index, vote in enumerate(votes)
+    ]
+    tasks = [
+        provider.critique(prompt_text, anonymized_votes, reviewer_model)
+        for reviewer_model in get_council_models()
+    ]
+    return list(await asyncio.gather(*tasks))
+
+
+async def stage3_adjudicate(
+    prompt_id: str,
+    prompt_text: str,
+    votes: List[ModelVote],
+    critiques: List[PeerCritique],
+) -> CouncilAdjudication:
+    """Adjudicate a final council label."""
+
+    del prompt_text
+    unsafe_votes = [vote for vote in votes if vote.label == "unsafe"]
+    safe_votes = [vote for vote in votes if vote.label == "safe"]
+    parse_failures = [vote for vote in votes if vote.parse_error]
+    serious_unsafe_categories = [
+        vote for vote in votes
+        if vote.unsafe_category in HIGH_SEVERITY_UNSAFE_CATEGORIES
+    ]
+    adjudicator_label = get_adjudicator_label(critiques)
+
+    if parse_failures:
+        return human_review(prompt_id, "Provider parse failure requires manual review.", votes)
+
+    if (
+        len(votes) == 3
+        and len(safe_votes) == 3
+        and average_confidence(safe_votes) >= AUTO_SAFE_THRESHOLD
+        and not serious_unsafe_categories
+        and adjudicator_label == "safe"
+    ):
+        confidence = average_confidence(safe_votes)
+        return CouncilAdjudication(
+            prompt_id=prompt_id,
+            final_label="safe",
+            unsafe_category="none",
+            confidence=round(confidence, 2),
+            rationale="All three models and the adjudicator agree the prompt is safe with sufficient confidence.",
+            human_review_reason=None,
+            decision_type="auto_safe",
+        )
+
+    if (
+        len(votes) == 3
+        and len(unsafe_votes) >= 2
+        and average_confidence(unsafe_votes) >= AUTO_UNSAFE_THRESHOLD
+        and adjudicator_label == "unsafe"
+    ):
+        category = most_common_category(unsafe_votes)
+        confidence = average_confidence(unsafe_votes)
+        return CouncilAdjudication(
+            prompt_id=prompt_id,
+            final_label="unsafe",
+            unsafe_category=category,
+            confidence=round(confidence, 2),
+            rationale=f"At least two of three models and the adjudicator agree the prompt is unsafe ({category}).",
+            human_review_reason=None,
+            decision_type="auto_unsafe",
+        )
+
+    return human_review(prompt_id, "Council votes did not meet explicit auto-safe or auto-unsafe rules.", votes)
+
+
+async def run_council(prompt_id: str, prompt_text: str, metadata: Optional[Dict[str, Any]] = None) -> tuple[List[ModelVote], List[PeerCritique], CouncilAdjudication]:
+    """Run all council stages."""
+
+    votes = await stage1_collect_votes(prompt_id, prompt_text, metadata)
+    shortcut = stage1_shortcut_adjudicate(prompt_id, votes)
+    if shortcut:
+        return votes, [], shortcut
+
+    critiques = await stage2_collect_critiques(prompt_text, votes)
+    adjudication = await stage3_adjudicate(prompt_id, prompt_text, votes, critiques)
+    return votes, critiques, adjudication
+
+
+def stage1_shortcut_adjudicate(prompt_id: str, votes: List[ModelVote]) -> Optional[CouncilAdjudication]:
+    """Return a Stage 1-only adjudication for clear cases."""
+
+    if len(votes) != 3:
+        return None
+    if any(vote.parse_error for vote in votes):
+        return None
+
+    unsafe_votes = [vote for vote in votes if vote.label == "unsafe"]
+    safe_votes = [vote for vote in votes if vote.label == "safe"]
+    serious_unsafe_categories = [
+        vote for vote in votes
+        if vote.unsafe_category in HIGH_SEVERITY_UNSAFE_CATEGORIES
+    ]
+    policy_sensitive_votes = [
+        vote for vote in votes
+        if vote.ambiguous_terms or "ambiguous_authorization" in vote.policy_triggers
+    ]
+
+    if (
+        len(safe_votes) == 3
+        and average_confidence(safe_votes) >= AUTO_SAFE_THRESHOLD
+        and not serious_unsafe_categories
+        and not policy_sensitive_votes
+    ):
+        return CouncilAdjudication(
+            prompt_id=prompt_id,
+            final_label="safe",
+            unsafe_category="none",
+            confidence=round(average_confidence(safe_votes), 2),
+            rationale="All three models voted safe with sufficient confidence; Stage 2 was skipped.",
+            human_review_reason=None,
+            decision_type="auto_safe",
+        )
+
+    if (
+        len(unsafe_votes) >= 2
+        and average_confidence(unsafe_votes) >= AUTO_UNSAFE_THRESHOLD
+        and not unsafe_category_is_ambiguous(unsafe_votes)
+    ):
+        category = most_common_category(unsafe_votes)
+        return CouncilAdjudication(
+            prompt_id=prompt_id,
+            final_label="unsafe",
+            unsafe_category=category,
+            confidence=round(average_confidence(unsafe_votes), 2),
+            rationale=f"At least two models voted unsafe with sufficient confidence ({category}); Stage 2 was skipped.",
+            human_review_reason=None,
+            decision_type="auto_unsafe",
+        )
+
+    return None
+
+
+def human_review(prompt_id: str, reason: str, votes: List[ModelVote]) -> CouncilAdjudication:
+    """Build a human-review adjudication."""
+
+    unsafe_votes = [vote for vote in votes if vote.label == "unsafe"]
+    category = most_common_category(unsafe_votes) if unsafe_votes else "none"
+    confidence = max((vote.confidence for vote in votes), default=0.0)
+    return CouncilAdjudication(
+        prompt_id=prompt_id,
+        final_label="needs_human_review",
+        unsafe_category=category,
+        confidence=round(confidence, 2),
+        rationale=reason,
+        human_review_reason=reason,
+        decision_type="human_review",
     )
 
-    # Prepare metadata
-    metadata = {
-        "label_to_model": label_to_model,
-        "aggregate_rankings": aggregate_rankings
-    }
 
-    return stage1_results, stage2_results, stage3_result, metadata
+def most_common_category(votes: List[ModelVote]) -> str:
+    """Return most common non-none unsafe category."""
+
+    categories = [vote.unsafe_category for vote in votes if vote.unsafe_category != "none"]
+    if not categories:
+        return "none"
+    return Counter(categories).most_common(1)[0][0]
+
+
+def average_confidence(votes: List[ModelVote]) -> float:
+    """Return average confidence for votes."""
+
+    if not votes:
+        return 0.0
+    return sum(vote.confidence for vote in votes) / len(votes)
+
+
+def unsafe_category_is_ambiguous(unsafe_votes: List[ModelVote]) -> bool:
+    """Return whether unsafe category signals need adjudication."""
+
+    categories = [vote.unsafe_category for vote in unsafe_votes if vote.unsafe_category != "none"]
+    return not categories or "other" in categories or len(set(categories)) > 1
+
+
+def get_adjudicator_label(critiques: List[PeerCritique]) -> Optional[str]:
+    """Return the configured adjudicator model's likely label."""
+
+    adjudicator_model = get_adjudicator_model()
+    for critique in critiques:
+        if critique.reviewer_model == adjudicator_model:
+            return critique.likely_label
+    if len(critiques) == 1:
+        return critiques[0].likely_label
+    return None

@@ -1,0 +1,23 @@
+import pytest
+
+from backend.csv_utils import parse_csv_annotations
+
+
+def test_csv_parsing_with_required_prompt_column():
+    records = parse_csv_annotations('prompt_id,prompt,metadata\np1,"Review fraud alerts","{""source"": ""csv""}"\n')
+
+    assert len(records) == 1
+    assert records[0].prompt_id == "p1"
+    assert records[0].prompt_text == "Review fraud alerts"
+    assert records[0].metadata == {"source": "csv"}
+
+
+def test_csv_parsing_missing_prompt_column():
+    with pytest.raises(ValueError, match="prompt"):
+        parse_csv_annotations("prompt_id,text\np1,hello\n")
+
+
+def test_csv_rows_without_prompt_id_get_deterministic_ids():
+    records = parse_csv_annotations("prompt\nfirst prompt\nsecond prompt\n")
+
+    assert [record.prompt_id for record in records] == ["row_1", "row_2"]

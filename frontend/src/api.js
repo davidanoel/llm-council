@@ -1,115 +1,76 @@
-/**
- * API client for the LLM Council backend.
- */
-
 const API_BASE = 'http://localhost:8001';
 
+async function request(path, options = {}) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+    ...options,
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || `Request failed: ${response.status}`);
+  }
+
+  return response.json();
+}
+
 export const api = {
-  /**
-   * List all conversations.
-   */
-  async listConversations() {
-    const response = await fetch(`${API_BASE}/api/conversations`);
-    if (!response.ok) {
-      throw new Error('Failed to list conversations');
-    }
-    return response.json();
+  health() {
+    return request('/api/health');
   },
 
-  /**
-   * Create a new conversation.
-   */
-  async createConversation() {
-    const response = await fetch(`${API_BASE}/api/conversations`, {
+  annotate(payload) {
+    return request('/api/annotate', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({}),
+      body: JSON.stringify(payload),
     });
-    if (!response.ok) {
-      throw new Error('Failed to create conversation');
-    }
-    return response.json();
   },
 
-  /**
-   * Get a specific conversation.
-   */
-  async getConversation(conversationId) {
-    const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}`
-    );
-    if (!response.ok) {
-      throw new Error('Failed to get conversation');
-    }
-    return response.json();
+  annotateBatch(prompts) {
+    return request('/api/annotate/batch-with-progress', {
+      method: 'POST',
+      body: JSON.stringify({ prompts }),
+    });
   },
 
-  /**
-   * Send a message in a conversation.
-   */
-  async sendMessage(conversationId, content) {
-    const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}/message`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ content }),
-      }
-    );
-    if (!response.ok) {
-      throw new Error('Failed to send message');
-    }
-    return response.json();
+  annotateCsv(csvText) {
+    return request('/api/annotate/csv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/csv' },
+      body: csvText,
+    });
   },
 
-  /**
-   * Send a message and receive streaming updates.
-   * @param {string} conversationId - The conversation ID
-   * @param {string} content - The message content
-   * @param {function} onEvent - Callback function for each event: (eventType, data) => void
-   * @returns {Promise<void>}
-   */
-  async sendMessageStream(conversationId, content, onEvent) {
-    const response = await fetch(
-      `${API_BASE}/api/conversations/${conversationId}/message/stream`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ content }),
-      }
-    );
+  listAnnotations() {
+    return request('/api/annotations');
+  },
 
-    if (!response.ok) {
-      throw new Error('Failed to send message');
-    }
+  getAnnotation(promptId) {
+    return request(`/api/annotations/${encodeURIComponent(promptId)}`);
+  },
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+  reviewQueue() {
+    return request('/api/review-queue');
+  },
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+  humanReview(payload) {
+    return request('/api/human-review', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
 
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
+  exportLabels(includePromptText = false) {
+    return request(`/api/export-labels?include_prompt_text=${includePromptText}`);
+  },
 
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          try {
-            const event = JSON.parse(data);
-            onEvent(event.type, event);
-          } catch (e) {
-            console.error('Failed to parse SSE event:', e);
-          }
-        }
-      }
-    }
+  evaluate(labels) {
+    return request('/api/evaluate', {
+      method: 'POST',
+      body: JSON.stringify({ labels }),
+    });
   },
 };

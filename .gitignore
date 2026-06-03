@@ -13,7 +13,8 @@ wheels/
 .env
 
 # Data files
-data/
+data/*
+!data/demo_prompts.json
 
 # Frontend
 frontend/node_modules/

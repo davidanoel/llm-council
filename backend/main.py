@@ -1,199 +1,189 @@
-"""FastAPI backend for LLM Council."""
+"""FastAPI backend for cybersecurity prompt annotation."""
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from typing import List, Dict, Any
-import uuid
-import json
+from __future__ import annotations
+
 import asyncio
+import os
+import uuid
+from typing import List
+
+from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from . import storage
-from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .council import run_council
+from .csv_utils import parse_csv_annotations
+from .evaluation import evaluate_predictions
+from .model_provider import external_calls_disabled, get_model_provider_name
+from .schemas import (
+    AnnotationRequest,
+    AnnotationResult,
+    BatchAnnotationResponse,
+    BatchAnnotationRequest,
+    BatchProgress,
+    EvaluationMetrics,
+    EvaluationRequest,
+    ExportedLabel,
+    HumanReviewRequest,
+    utc_now,
+)
 
-app = FastAPI(title="LLM Council API")
 
-# Enable CORS for local development
+app = FastAPI(title="Cybersecurity Prompt Labelling API")
+MAX_PROMPT_CONCURRENCY = int(os.getenv("MAX_PROMPT_CONCURRENCY", "5"))
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):(3000|5173|5174|5175)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-class CreateConversationRequest(BaseModel):
-    """Request to create a new conversation."""
-    pass
-
-
-class SendMessageRequest(BaseModel):
-    """Request to send a message in a conversation."""
-    content: str
-
-
-class ConversationMetadata(BaseModel):
-    """Conversation metadata for list view."""
-    id: str
-    created_at: str
-    title: str
-    message_count: int
-
-
-class Conversation(BaseModel):
-    """Full conversation with all messages."""
-    id: str
-    created_at: str
-    title: str
-    messages: List[Dict[str, Any]]
-
-
-@app.get("/")
-async def root():
+@app.get("/api/health")
+async def health() -> dict:
     """Health check endpoint."""
-    return {"status": "ok", "service": "LLM Council API"}
 
-
-@app.get("/api/conversations", response_model=List[ConversationMetadata])
-async def list_conversations():
-    """List all conversations (metadata only)."""
-    return storage.list_conversations()
-
-
-@app.post("/api/conversations", response_model=Conversation)
-async def create_conversation(request: CreateConversationRequest):
-    """Create a new conversation."""
-    conversation_id = str(uuid.uuid4())
-    conversation = storage.create_conversation(conversation_id)
-    return conversation
-
-
-@app.get("/api/conversations/{conversation_id}", response_model=Conversation)
-async def get_conversation(conversation_id: str):
-    """Get a specific conversation with all its messages."""
-    conversation = storage.get_conversation(conversation_id)
-    if conversation is None:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    return conversation
-
-
-@app.post("/api/conversations/{conversation_id}/message")
-async def send_message(conversation_id: str, request: SendMessageRequest):
-    """
-    Send a message and run the 3-stage council process.
-    Returns the complete response with all stages.
-    """
-    # Check if conversation exists
-    conversation = storage.get_conversation(conversation_id)
-    if conversation is None:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-
-    # Check if this is the first message
-    is_first_message = len(conversation["messages"]) == 0
-
-    # Add user message
-    storage.add_user_message(conversation_id, request.content)
-
-    # If this is the first message, generate a title
-    if is_first_message:
-        title = await generate_conversation_title(request.content)
-        storage.update_conversation_title(conversation_id, title)
-
-    # Run the 3-stage council process
-    stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        request.content
-    )
-
-    # Add assistant message with all stages
-    storage.add_assistant_message(
-        conversation_id,
-        stage1_results,
-        stage2_results,
-        stage3_result
-    )
-
-    # Return the complete response with metadata
     return {
-        "stage1": stage1_results,
-        "stage2": stage2_results,
-        "stage3": stage3_result,
-        "metadata": metadata
+        "status": "ok",
+        "service": "Cybersecurity Prompt Labelling API",
+        "model_provider": get_model_provider_name(),
+        "external_calls_disabled": external_calls_disabled(),
     }
 
 
-@app.post("/api/conversations/{conversation_id}/message/stream")
-async def send_message_stream(conversation_id: str, request: SendMessageRequest):
-    """
-    Send a message and stream the 3-stage council process.
-    Returns Server-Sent Events as each stage completes.
-    """
-    # Check if conversation exists
-    conversation = storage.get_conversation(conversation_id)
-    if conversation is None:
-        raise HTTPException(status_code=404, detail="Conversation not found")
+@app.post("/api/annotate", response_model=AnnotationResult)
+async def annotate(request: AnnotationRequest) -> AnnotationResult:
+    """Annotate and store one prompt."""
 
-    # Check if this is the first message
-    is_first_message = len(conversation["messages"]) == 0
-
-    async def event_generator():
-        try:
-            # Add user message
-            storage.add_user_message(conversation_id, request.content)
-
-            # Start title generation in parallel (don't await yet)
-            title_task = None
-            if is_first_message:
-                title_task = asyncio.create_task(generate_conversation_title(request.content))
-
-            # Stage 1: Collect responses
-            yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(request.content)
-            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
-
-            # Stage 2: Collect rankings
-            yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
-            aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
-
-            # Stage 3: Synthesize final answer
-            yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
-            yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
-
-            # Wait for title generation if it was started
-            if title_task:
-                title = await title_task
-                storage.update_conversation_title(conversation_id, title)
-                yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
-
-            # Save complete assistant message
-            storage.add_assistant_message(
-                conversation_id,
-                stage1_results,
-                stage2_results,
-                stage3_result
-            )
-
-            # Send completion event
-            yield f"data: {json.dumps({'type': 'complete'})}\n\n"
-
-        except Exception as e:
-            # Send error event
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
+    prompt_id = request.prompt_id or str(uuid.uuid4())
+    existing = storage.load_annotation(prompt_id)
+    created_at = existing.created_at if existing else utc_now()
+    votes, critiques, adjudication = await run_council(prompt_id, request.prompt_text, request.metadata)
+    result = AnnotationResult(
+        prompt_id=prompt_id,
+        prompt_text=request.prompt_text,
+        metadata=request.metadata,
+        votes=votes,
+        critiques=critiques,
+        adjudication=adjudication,
+        human_reviews=existing.human_reviews if existing else [],
+        created_at=created_at,
+        updated_at=utc_now(),
     )
+    return storage.save_annotation(result)
+
+
+@app.post("/api/annotate/batch", response_model=List[AnnotationResult])
+async def annotate_batch_legacy(request: BatchAnnotationRequest) -> List[AnnotationResult]:
+    """Deprecated compatibility endpoint shape."""
+
+    response = await run_annotation_batch(request.prompts)
+    return response.results
+
+
+@app.post("/api/annotate/batch-with-progress", response_model=BatchAnnotationResponse)
+async def annotate_batch(request: BatchAnnotationRequest) -> BatchAnnotationResponse:
+    """Annotate and store multiple prompts."""
+
+    return await run_annotation_batch(request.prompts)
+
+
+@app.post("/api/annotate/csv", response_model=BatchAnnotationResponse)
+async def annotate_csv(csv_text: str = Body(..., media_type="text/csv")) -> BatchAnnotationResponse:
+    """Annotate prompts from CSV text."""
+
+    try:
+        prompts = parse_csv_annotations(csv_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    return await run_annotation_batch(prompts)
+
+
+async def run_annotation_batch(prompts: List[AnnotationRequest]) -> BatchAnnotationResponse:
+    """Run a bounded-concurrency in-process annotation batch."""
+
+    progress = BatchProgress(total=len(prompts))
+    semaphore = asyncio.Semaphore(MAX_PROMPT_CONCURRENCY)
+
+    async def run_one(prompt: AnnotationRequest) -> AnnotationResult | None:
+        nonlocal progress
+        async with semaphore:
+            try:
+                result = await annotate(prompt)
+                progress.completed += 1
+                if result.adjudication:
+                    if result.adjudication.decision_type == "auto_safe":
+                        progress.auto_safe += 1
+                    elif result.adjudication.decision_type == "auto_unsafe":
+                        progress.auto_unsafe += 1
+                    else:
+                        progress.human_review += 1
+                else:
+                    progress.failed += 1
+                return result
+            except Exception:
+                progress.failed += 1
+                return None
+
+    raw_results = await asyncio.gather(*(run_one(prompt) for prompt in prompts))
+    results = [result for result in raw_results if result is not None]
+    return BatchAnnotationResponse(results=results, progress=progress)
+
+
+@app.get("/api/annotations", response_model=List[AnnotationResult])
+async def list_annotations() -> List[AnnotationResult]:
+    """List stored annotations."""
+
+    return storage.list_annotations()
+
+
+@app.get("/api/annotations/{prompt_id}", response_model=AnnotationResult)
+async def get_annotation(prompt_id: str) -> AnnotationResult:
+    """Get one stored annotation."""
+
+    annotation = storage.load_annotation(prompt_id)
+    if annotation is None:
+        raise HTTPException(status_code=404, detail="Annotation not found")
+    return annotation
+
+
+@app.get("/api/review-queue", response_model=List[AnnotationResult])
+async def get_review_queue() -> List[AnnotationResult]:
+    """List annotations requiring human review."""
+
+    return storage.review_queue()
+
+
+@app.post("/api/human-review", response_model=AnnotationResult)
+async def human_review(request: HumanReviewRequest) -> AnnotationResult:
+    """Store a human override."""
+
+    try:
+        return storage.add_human_review(request)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Annotation not found") from None
+
+
+@app.get("/api/export-labels", response_model=List[ExportedLabel])
+async def export_labels(include_prompt_text: bool = Query(default=False)) -> List[ExportedLabel]:
+    """Export labels, preferring human overrides."""
+
+    return storage.export_labels(include_prompt_text=include_prompt_text)
+
+
+@app.post("/api/evaluate", response_model=EvaluationMetrics)
+async def evaluate(request: EvaluationRequest) -> EvaluationMetrics:
+    """Evaluate exported labels against supplied human-majority labels."""
+
+    gold = {item.prompt_id: item.label for item in request.labels}
+    return evaluate_predictions(storage.export_labels(), gold)
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8001)

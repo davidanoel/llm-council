@@ -1,87 +1,215 @@
-# LLM Council
+# Cyber Annotation Council
 
-![llmcouncil](header.jpg)
+Cyber Annotation Council is a local prompt labelling tool for cybersecurity safety review. It classifies prompts as:
 
-The idea of this repo is that instead of asking a question to your favorite LLM provider (e.g. OpenAI GPT 5.1, Google Gemini 3.0 Pro, Anthropic Claude Sonnet 4.5, xAI Grok 4, eg.c), you can group them into your "LLM Council". This repo is a simple, local web app that essentially looks like ChatGPT except it uses OpenRouter to send your query to multiple LLMs, it then asks them to review and rank each other's work, and finally a Chairman LLM produces the final response.
+- `safe`
+- `unsafe`
+- `needs_human_review`
 
-In a bit more detail, here is what happens when you submit a query:
+The app uses a simple council pattern:
 
-1. **Stage 1: First opinions**. The user query is given to all LLMs individually, and the responses are collected. The individual responses are shown in a "tab view", so that the user can inspect them all one by one.
-2. **Stage 2: Review**. Each individual LLM is given the responses of the other LLMs. Under the hood, the LLM identities are anonymized so that the LLM can't play favorites when judging their outputs. The LLM is asked to rank them in accuracy and insight.
-3. **Stage 3: Final response**. The designated Chairman of the LLM Council takes all of the model's responses and compiles them into a single final answer that is presented to the user.
+1. Independent model votes.
+2. Peer critique/disagreement pass.
+3. Final adjudication.
+4. Optional human override.
+5. Label export.
+6. Evaluation against human-majority labels.
 
-## Vibe Code Alert
+The backend is FastAPI. The frontend is React/Vite. Local storage is JSON files in `data/annotations/`.
 
-This project was 99% vibe coded as a fun Saturday hack because I wanted to explore and evaluate a number of LLMs side by side in the process of [reading books together with LLMs](https://x.com/karpathy/status/1990577951671509438). It's nice and useful to see multiple responses side by side, and also the cross-opinions of all LLMs on each other's outputs. I'm not going to support it in any way, it's provided here as is for other people's inspiration and I don't intend to improve it. Code is ephemeral now and libraries are over, ask your LLM to change it in whatever way you like.
+## Privacy
+
+The default provider configuration is `internal` and points at company model URLs under `https://ewp.aexp.com/<modelname>`.
+
+Never send real company prompts, customer data, secrets, logs, source code, incident data, or internal system details to external APIs without explicit approval.
+
+For purely local development, set `MODEL_PROVIDER=mock` and `DISABLE_EXTERNAL_CALLS=true`.
 
 ## Setup
 
-### 1. Install Dependencies
+Install backend dependencies:
 
-The project uses [uv](https://docs.astral.sh/uv/) for project management.
-
-**Backend:**
 ```bash
 uv sync
 ```
 
-**Frontend:**
+Install frontend dependencies:
+
 ```bash
 cd frontend
 npm install
 cd ..
 ```
 
-### 2. Configure API Key
-
-Create a `.env` file in the project root:
+Copy local environment defaults:
 
 ```bash
-OPENROUTER_API_KEY=sk-or-v1-...
+cp .env.example .env
 ```
 
-Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purchase the credits you need, or sign up for automatic top up.
+## Run Backend
 
-### 3. Configure Models (Optional)
-
-Edit `backend/config.py` to customize the council:
-
-```python
-COUNCIL_MODELS = [
-    "openai/gpt-5.1",
-    "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4.5",
-    "x-ai/grok-4",
-]
-
-CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
-```
-
-## Running the Application
-
-**Option 1: Use the start script**
-```bash
-./start.sh
-```
-
-**Option 2: Run manually**
-
-Terminal 1 (Backend):
 ```bash
 uv run python -m backend.main
 ```
 
-Terminal 2 (Frontend):
+Backend health:
+
+```bash
+curl http://localhost:8001/api/health
+```
+
+## Run Frontend
+
 ```bash
 cd frontend
 npm run dev
 ```
 
-Then open http://localhost:5173 in your browser.
+Open `http://localhost:5173`.
 
-## Tech Stack
+## Internal Provider
 
-- **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API
-- **Frontend:** React + Vite, react-markdown for rendering
-- **Storage:** JSON files in `data/conversations/`
-- **Package Management:** uv for Python, npm for JavaScript
+Default internal configuration:
+
+```bash
+MODEL_PROVIDER=internal
+COUNCIL_MODELS=chatgpt-5.1,gemini-3.1-pro,claude-sonnet-4.5
+ADJUDICATOR_MODEL=gemini-3.1-pro
+CHATGPT_5_1_URL=https://ewp.aexp.com/chatgpt-5.1
+GEMINI_3_1_PRO_URL=https://ewp.aexp.com/gemini-3.1-pro
+CLAUDE_SONNET_4_5_URL=https://ewp.aexp.com/claude-sonnet-4.5
+```
+
+Optional bearer auth:
+
+```bash
+INTERNAL_MODEL_API_KEY=
+```
+
+## Mock Provider
+
+The mock provider is deterministic and synthetic. It is intended for UI development, storage testing, and evaluation plumbing.
+
+```bash
+MODEL_PROVIDER=mock
+DISABLE_EXTERNAL_CALLS=true
+```
+
+## Annotate One Prompt
+
+Use the frontend Single Annotation panel or call:
+
+```bash
+curl -X POST http://localhost:8001/api/annotate \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "prompt_id": "demo-safe-port",
+    "prompt_text": "How do I kill port 8080 on my laptop?",
+    "metadata": {"source": "demo"}
+  }'
+```
+
+## Batch Annotate
+
+CSV upload is the primary batch path in the frontend.
+
+Expected CSV format:
+
+```csv
+prompt_id,prompt,metadata
+p1,How do I kill port 8080?,"{""source"": ""demo""}"
+,Review synthetic transactions for fraud detection,"{""source"": ""demo""}"
+```
+
+The `prompt` column is required. `prompt_id` and `metadata` are optional. Missing `prompt_id` values become deterministic IDs such as `row_1`, `row_2`, and so on.
+
+You can also call the CSV endpoint directly:
+
+```bash
+curl -X POST http://localhost:8001/api/annotate/csv \
+  -H 'Content-Type: text/csv' \
+  --data-binary @prompts.csv
+```
+
+JSON batch remains available:
+
+```bash
+curl -X POST http://localhost:8001/api/annotate/batch \
+  -H 'Content-Type: application/json' \
+  -d '{"prompts": [
+    {
+      "prompt_id": "demo-safe-port",
+      "prompt_text": "How do I kill port 8080 on my laptop?",
+      "metadata": {"source": "demo"}
+    }
+  ]}'
+```
+
+Synthetic demo prompts are available in `data/demo_prompts.json`.
+
+## Review Human Queue
+
+Prompts adjudicated as `human_review` appear at:
+
+```bash
+curl http://localhost:8001/api/review-queue
+```
+
+Save an override:
+
+```bash
+curl -X POST http://localhost:8001/api/human-review \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "prompt_id": "demo-ambiguous-exploit",
+    "label": "needs_human_review",
+    "unsafe_category": "exploit_execution",
+    "rationale": "Authorization is unclear.",
+    "reviewer": "analyst"
+  }'
+```
+
+The frontend clearly separates council label, human override, and final effective label.
+
+## Export Labels
+
+```bash
+curl 'http://localhost:8001/api/export-labels?include_prompt_text=true'
+```
+
+Human overrides take precedence over council labels in export output.
+
+## Evaluate Against Human-Majority Labels
+
+The evaluation API compares stored predictions against supplied gold labels. `unsafe` is positive, `safe` is negative, and `needs_human_review` is treated as abstention.
+
+```bash
+curl -X POST http://localhost:8001/api/evaluate \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "labels": [
+      {"prompt_id": "demo-safe-port", "label": "safe"}
+    ]
+  }'
+```
+
+The frontend Evaluation panel accepts records shaped like:
+
+```json
+[
+  {
+    "prompt_id": "demo-safe-port",
+    "gold_label": "safe",
+    "predicted_label": "safe"
+  }
+]
+```
+
+`predicted_label` is shown for analyst convenience in pasted records; the backend evaluates against stored exported predictions.
+
+## Tests
+
+```bash
+uv run pytest -q
+```
