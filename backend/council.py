@@ -13,13 +13,14 @@ from .schemas import CouncilDecision, ModelVote
 async def collect_votes(
     prompt_id: str,
     prompt_text: str,
+    response_text: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> List[ModelVote]:
     """Collect independent votes from every configured annotator."""
 
     provider = get_provider()
     tasks = [
-        provider.annotate(prompt_id, prompt_text, model_name, metadata)
+        provider.annotate(prompt_id, prompt_text, model_name, metadata, response_text)
         for model_name in get_council_models()
     ]
     return list(await asyncio.gather(*tasks))
@@ -68,11 +69,12 @@ def aggregate_votes(prompt_id: str, votes: List[ModelVote]) -> CouncilDecision:
 async def run_council(
     prompt_id: str,
     prompt_text: str,
+    response_text: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> tuple[List[ModelVote], CouncilDecision]:
     """Collect independent votes and aggregate them deterministically."""
 
-    votes = await collect_votes(prompt_id, prompt_text, metadata)
+    votes = await collect_votes(prompt_id, prompt_text, response_text, metadata)
     return votes, aggregate_votes(prompt_id, votes)
 
 

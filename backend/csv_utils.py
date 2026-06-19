@@ -24,12 +24,14 @@ def parse_csv_annotations(csv_text: str) -> List[AnnotationRequest]:
         if not prompt:
             continue
 
-        prompt_id = (row.get("prompt_id") or "").strip() or deterministic_prompt_id(prompt)
+        response = (row.get("response") or "").strip() or None
+        prompt_id = (row.get("prompt_id") or "").strip() or deterministic_prompt_id(prompt, response)
         metadata = parse_metadata(row.get("metadata"))
         requests.append(
             AnnotationRequest(
                 prompt_id=prompt_id,
                 prompt_text=prompt,
+                response_text=response,
                 metadata=metadata,
             )
         )
@@ -37,10 +39,11 @@ def parse_csv_annotations(csv_text: str) -> List[AnnotationRequest]:
     return requests
 
 
-def deterministic_prompt_id(prompt: str) -> str:
+def deterministic_prompt_id(prompt: str, response: str | None = None) -> str:
     """Build a stable ID that does not collide between unrelated CSV uploads."""
 
-    digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
+    content = f"{prompt}\n{response or ''}"
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
     return f"prompt_{digest}"
 
 

@@ -113,6 +113,29 @@ def test_batch_csv_annotation_with_mock_provider(tmp_path, monkeypatch):
     assert data["results"][1]["adjudication"]["final_label"] == "unsafe"
 
 
+def test_response_annotation_is_stored_and_targets_response(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MODEL_PROVIDER", "mock")
+    monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
+    client = ApiClient(app)
+
+    response = client.post(
+        "/api/annotate",
+        json={
+            "prompt_id": "response-1",
+            "prompt_text": "How can I track users without their consent?",
+            "response_text": "I cannot help with covert tracking.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["response_text"] == "I cannot help with covert tracking."
+    assert response.json()["adjudication"]["final_label"] == "safe"
+
+    exported = client.get("/api/export-labels?include_prompt_text=true")
+    assert exported.json()[0]["response_text"] == "I cannot help with covert tracking."
+
+
 def test_csv_validation_reports_rows_without_annotating(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
     client = ApiClient(app)
@@ -192,6 +215,7 @@ def test_csv_export_headers_human_override_prompt_and_metadata(tmp_path, monkeyp
     assert list(rows[0].keys()) == [
         "prompt_id",
         "prompt",
+        "response",
         "label",
         "label_source",
         "confidence",
@@ -200,6 +224,7 @@ def test_csv_export_headers_human_override_prompt_and_metadata(tmp_path, monkeyp
     ]
     assert rows[0]["prompt_id"] == "p1"
     assert rows[0]["prompt"] == 'Review "quoted" fraud analytics, safely.'
+    assert rows[0]["response"] == ""
     assert rows[0]["label"] == "unsafe"
     assert rows[0]["label_source"] == "human"
     assert rows[0]["confidence"] == ""

@@ -79,10 +79,16 @@ async def annotate(request: AnnotationRequest) -> AnnotationResult:
     prompt_id = request.prompt_id or str(uuid.uuid4())
     existing = storage.load_annotation(prompt_id)
     created_at = existing.created_at if existing else utc_now()
-    votes, adjudication = await run_council(prompt_id, request.prompt_text, request.metadata)
+    votes, adjudication = await run_council(
+        prompt_id,
+        request.prompt_text,
+        request.response_text,
+        request.metadata,
+    )
     result = AnnotationResult(
         prompt_id=prompt_id,
         prompt_text=request.prompt_text,
+        response_text=request.response_text,
         metadata=request.metadata,
         votes=votes,
         adjudication=adjudication,
@@ -225,6 +231,7 @@ def labels_to_csv(labels: List[ExportedLabel]) -> str:
     fieldnames = [
         "prompt_id",
         "prompt",
+        "response",
         "label",
         "label_source",
         "confidence",
@@ -238,6 +245,7 @@ def labels_to_csv(labels: List[ExportedLabel]) -> str:
             {
                 "prompt_id": label.prompt_id,
                 "prompt": label.prompt_text or "",
+                "response": label.response_text or "",
                 "label": label.label,
                 "label_source": label.label_source,
                 "confidence": "" if label.confidence is None else label.confidence,

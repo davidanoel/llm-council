@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
-import { Badge, DecisionSummary, VoteDetails } from './AnnotationDetails';
+import { AnnotationContent, Badge, DecisionSummary, VoteDetails } from './AnnotationDetails';
 import { displayLabel, effectiveLabel } from './annotationUtils';
 
 export default function ResultsView({ refreshVersion, onReview }) {
@@ -51,7 +51,7 @@ export default function ResultsView({ refreshVersion, onReview }) {
     <section className="view-stack">
       <section className="panel results-panel">
         <div className="results-toolbar">
-          <div><h2>Annotation results</h2><p className="muted">{filtered.length} of {annotations.length} prompts</p></div>
+          <div><h2>Annotation results</h2><p className="muted">{filtered.length} of {annotations.length} items</p></div>
           <div className="button-row">
             {annotations.some((item) => effectiveLabel(item) === 'needs_human_review') && <button type="button" onClick={onReview}>Review unresolved</button>}
             <button type="button" className="secondary" onClick={downloadJson}>Export JSON</button>
@@ -95,7 +95,7 @@ export default function ResultsView({ refreshVersion, onReview }) {
       {selected && (
         <section className="panel result-inspector">
           <h2>{selected.prompt_id}</h2>
-          <div className="prompt-review"><span>Prompt</span><p>{selected.prompt_text}</p></div>
+          <AnnotationContent annotation={selected} />
           <DecisionSummary annotation={selected} />
           {effectiveLabel(selected) === 'needs_human_review' && <button type="button" onClick={onReview}>Set human label</button>}
           <details className="model-details"><summary>Show model votes</summary><VoteDetails annotation={selected} /></details>

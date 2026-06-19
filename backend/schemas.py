@@ -33,6 +33,7 @@ class AnnotationRequest(BaseModel):
 
     prompt_id: Optional[str] = None
     prompt_text: str = Field(..., min_length=1)
+    response_text: Optional[str] = Field(default=None, min_length=1)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -112,6 +113,7 @@ class AnnotationResult(BaseModel):
 
     prompt_id: str
     prompt_text: str
+    response_text: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
     votes: List[ModelVote] = Field(default_factory=list)
     adjudication: Optional[CouncilDecision] = None
@@ -129,6 +131,7 @@ class ExportedLabel(BaseModel):
     confidence: Optional[float] = None
     unsafe_category: UnsafeCategory = "none"
     prompt_text: Optional[str] = None
+    response_text: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 

@@ -4,6 +4,12 @@ import { DecisionSummary, VoteDetails } from './AnnotationDetails';
 
 const JSON_SAMPLE = JSON.stringify([
   { prompt_id: 'demo-safe', prompt_text: 'How do I kill port 8080?', metadata: { source: 'demo' } },
+  {
+    prompt_id: 'demo-safe-refusal',
+    prompt_text: 'How can I track users without their consent?',
+    response_text: "I can't help track people without consent.",
+    metadata: { source: 'demo' },
+  },
 ], null, 2);
 
 export default function AnnotateView({ onComplete }) {
@@ -13,6 +19,7 @@ export default function AnnotateView({ onComplete }) {
   const [summary, setSummary] = useState(null);
   const [singleResult, setSingleResult] = useState(null);
   const [singlePrompt, setSinglePrompt] = useState('');
+  const [singleResponse, setSingleResponse] = useState('');
   const [singleMetadata, setSingleMetadata] = useState('{}');
   const [jsonText, setJsonText] = useState(JSON_SAMPLE);
   const [status, setStatus] = useState('');
@@ -60,7 +67,9 @@ export default function AnnotateView({ onComplete }) {
     setStatus('Annotating prompt...');
     try {
       const metadata = singleMetadata.trim() ? JSON.parse(singleMetadata) : {};
-      const result = await api.annotate({ prompt_text: singlePrompt, metadata });
+      const payload = { prompt_text: singlePrompt, metadata };
+      if (singleResponse.trim()) payload.response_text = singleResponse.trim();
+      const result = await api.annotate(payload);
       setSingleResult(result);
       setStatus('Annotation complete.');
     } catch (err) {
@@ -92,7 +101,7 @@ export default function AnnotateView({ onComplete }) {
 
       <section className="panel primary-panel">
         <h2>Upload prompts</h2>
-        <p className="muted">CSV requires a <code>prompt</code> column. Optional columns: <code>prompt_id</code>, <code>metadata</code>.</p>
+        <p className="muted">CSV requires a <code>prompt</code> column. Optional columns: <code>response</code>, <code>prompt_id</code>, <code>metadata</code>. When present, the response is classified.</p>
         <label className="file-drop">
           <span>{csvFile ? csvFile.name : 'Choose a CSV file'}</span>
           <input type="file" accept=".csv,text/csv" onChange={selectCsv} />
@@ -110,6 +119,7 @@ export default function AnnotateView({ onComplete }) {
         <summary>Advanced: single prompt</summary>
         <form className="form advanced-content" onSubmit={runSingle}>
           <label>Prompt<textarea rows={5} required value={singlePrompt} onChange={(event) => setSinglePrompt(event.target.value)} /></label>
+          <label>Assistant response (optional)<textarea rows={5} value={singleResponse} onChange={(event) => setSingleResponse(event.target.value)} /></label>
           <label>Metadata JSON<textarea rows={3} value={singleMetadata} onChange={(event) => setSingleMetadata(event.target.value)} /></label>
           <button type="submit">Annotate prompt</button>
         </form>

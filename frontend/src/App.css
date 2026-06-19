@@ -136,6 +136,7 @@ dd { margin: 0; }
 .prompt-review { margin: 16px 0; padding: 14px; border-left: 4px solid #24557a; background: #f5f8fa; }
 .prompt-review span { color: #607080; font-size: 12px; font-weight: 700; text-transform: uppercase; }
 .prompt-review p { margin: 7px 0 0; white-space: pre-wrap; }
+.response-target { border-left-color: #17633a; background: #f3faf6; }
 .vote-strip { padding: 10px 0; }
 .review-form { margin-top: 16px; max-width: 700px; }
 fieldset { margin: 0; padding: 0; border: 0; }

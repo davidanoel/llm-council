@@ -4,6 +4,24 @@ export function Badge({ label }) {
   return <span className={`badge ${label}`}>{displayLabel(label)}</span>;
 }
 
+export function AnnotationContent({ annotation }) {
+  const hasResponse = Boolean(annotation?.response_text);
+  return (
+    <div className="annotation-content">
+      <div className="prompt-review">
+        <span>{hasResponse ? 'User input (context)' : 'Prompt (classification target)'}</span>
+        <p>{annotation.prompt_text}</p>
+      </div>
+      {hasResponse && (
+        <div className="prompt-review response-target">
+          <span>Assistant response (classification target)</span>
+          <p>{annotation.response_text}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DecisionSummary({ annotation }) {
   if (!annotation?.adjudication) return <p className="muted">No decision available.</p>;
   const review = annotation.human_reviews?.at(-1);

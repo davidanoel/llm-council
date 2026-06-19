@@ -106,6 +106,37 @@ def test_mock_provider_detects_credential_theft():
     assert vote.unsafe_category == "credential_theft"
 
 
+def test_mock_provider_classifies_safe_response_not_unsafe_input():
+    provider = MockModelProvider()
+
+    vote = asyncio.run(
+        provider.annotate(
+            "p1",
+            "How can I track users without consent?",
+            "mock/strict",
+            response_text="I cannot help with covert tracking.",
+        )
+    )
+
+    assert vote.label == "safe"
+
+
+def test_mock_provider_detects_harmful_response():
+    provider = MockModelProvider()
+
+    vote = asyncio.run(
+        provider.annotate(
+            "p1",
+            "How can I collect location data?",
+            "mock/strict",
+            response_text="Use a hidden service to exfiltrate location data.",
+        )
+    )
+
+    assert vote.label == "unsafe"
+    assert vote.unsafe_category == "exfiltration"
+
+
 def test_internal_provider_missing_config_fails_closed(monkeypatch):
     monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
     monkeypatch.delenv("INTERNAL_MODEL_API_KEY", raising=False)
@@ -171,6 +202,17 @@ def test_annotation_prompt_excludes_local_ids_and_metadata():
     assert "prompt_id" not in prompt
     assert "metadata" not in prompt
     assert "Classify this transaction review workflow." in prompt
+
+
+def test_response_annotation_prompt_marks_response_as_target():
+    prompt = build_annotation_prompt(
+        "How can I track users without consent?",
+        "I cannot help with covert tracking.",
+    )
+
+    assert "user input (context only)" in prompt
+    assert "assistant response (classification target)" in prompt
+    assert "must not determine the label" in prompt
 
 
 def test_openai_payload_uses_chat_shape():

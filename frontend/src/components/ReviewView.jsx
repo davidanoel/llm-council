@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
-import { Badge, DecisionSummary, VoteDetails } from './AnnotationDetails';
+import { AnnotationContent, Badge, DecisionSummary, VoteDetails } from './AnnotationDetails';
 import { UNSAFE_CATEGORIES } from './annotationUtils';
 
 export default function ReviewView({ refreshVersion, onSaved }) {
@@ -77,7 +77,7 @@ export default function ReviewView({ refreshVersion, onSaved }) {
         </div>
       </div>
 
-      <div className="prompt-review"><span>Prompt</span><p>{current.prompt_text}</p></div>
+      <AnnotationContent annotation={current} />
 
       <div className="review-form">
         <fieldset>
