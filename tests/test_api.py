@@ -51,6 +51,7 @@ def test_annotate_and_export_api(tmp_path, monkeypatch):
     exported = client.get("/api/export-labels")
     assert exported.status_code == 200
     assert exported.json()[0]["prompt_id"] == "p1"
+    assert len(exported.json()[0]["votes"]) == 3
 
     agreement = client.get("/api/agreement")
     assert agreement.status_code == 200
@@ -212,7 +213,7 @@ def test_csv_export_headers_human_override_prompt_and_metadata(tmp_path, monkeyp
     assert response.headers["content-type"].startswith("text/csv")
     rows = list(csv.DictReader(StringIO(response.text)))
     assert rows
-    assert list(rows[0].keys()) == [
+    assert list(rows[0].keys())[:8] == [
         "prompt_id",
         "prompt",
         "response",
@@ -222,6 +223,13 @@ def test_csv_export_headers_human_override_prompt_and_metadata(tmp_path, monkeyp
         "unsafe_category",
         "metadata",
     ]
+    for index in range(1, 4):
+        assert f"vote_{index}_model" in rows[0]
+        assert f"vote_{index}_label" in rows[0]
+        assert f"vote_{index}_confidence" in rows[0]
+        assert f"vote_{index}_unsafe_category" in rows[0]
+        assert f"vote_{index}_rationale" in rows[0]
+        assert f"vote_{index}_parse_error" in rows[0]
     assert rows[0]["prompt_id"] == "p1"
     assert rows[0]["prompt"] == 'Review "quoted" fraud analytics, safely.'
     assert rows[0]["response"] == ""
@@ -230,6 +238,10 @@ def test_csv_export_headers_human_override_prompt_and_metadata(tmp_path, monkeyp
     assert rows[0]["confidence"] == ""
     assert rows[0]["unsafe_category"] == "phishing"
     assert json.loads(rows[0]["metadata"]) == {"dataset": "unit,csv", "nested": {"x": 1}}
+    assert rows[0]["vote_1_model"]
+    assert rows[0]["vote_1_label"] == "safe"
+    assert rows[0]["vote_1_confidence"]
+    assert rows[0]["vote_1_rationale"]
 
 
 def test_batch_provider_failure_counts_completed_human_review_and_provider_failed(tmp_path, monkeypatch):

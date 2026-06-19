@@ -238,21 +238,38 @@ def labels_to_csv(labels: List[ExportedLabel]) -> str:
         "unsafe_category",
         "metadata",
     ]
+    vote_fields = ["model", "label", "confidence", "unsafe_category", "rationale", "parse_error"]
+    fieldnames.extend(
+        f"vote_{index}_{field}"
+        for index in range(1, 4)
+        for field in vote_fields
+    )
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
     for label in labels:
-        writer.writerow(
-            {
-                "prompt_id": label.prompt_id,
-                "prompt": label.prompt_text or "",
-                "response": label.response_text or "",
-                "label": label.label,
-                "label_source": label.label_source,
-                "confidence": "" if label.confidence is None else label.confidence,
-                "unsafe_category": label.unsafe_category,
-                "metadata": json.dumps(label.metadata, sort_keys=True),
-            }
-        )
+        row = {
+            "prompt_id": label.prompt_id,
+            "prompt": label.prompt_text or "",
+            "response": label.response_text or "",
+            "label": label.label,
+            "label_source": label.label_source,
+            "confidence": "" if label.confidence is None else label.confidence,
+            "unsafe_category": label.unsafe_category,
+            "metadata": json.dumps(label.metadata, sort_keys=True),
+        }
+        for index in range(1, 4):
+            vote = label.votes[index - 1] if index <= len(label.votes) else None
+            row.update(
+                {
+                    f"vote_{index}_model": vote.model_name if vote else "",
+                    f"vote_{index}_label": vote.label if vote else "",
+                    f"vote_{index}_confidence": vote.confidence if vote else "",
+                    f"vote_{index}_unsafe_category": vote.unsafe_category if vote else "",
+                    f"vote_{index}_rationale": vote.rationale if vote else "",
+                    f"vote_{index}_parse_error": vote.parse_error or "" if vote else "",
+                }
+            )
+        writer.writerow(row)
     return output.getvalue()
 
 

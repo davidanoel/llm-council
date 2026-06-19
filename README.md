@@ -104,6 +104,7 @@ Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
 - `GET /api/export-labels.csv`
 
 Exports use the latest human label when present.
+JSON exports include the complete structured model vote list. CSV exports flatten the three votes into `vote_1_*`, `vote_2_*`, and `vote_3_*` columns for model name, label, confidence, unsafe category, rationale, and parse error.
 
 ## Tests
 

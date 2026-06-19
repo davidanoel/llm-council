@@ -116,6 +116,7 @@ def export_labels(include_prompt_text: bool = False) -> List[ExportedLabel]:
                 prompt_text=annotation.prompt_text if include_prompt_text else None,
                 response_text=annotation.response_text if include_prompt_text else None,
                 metadata=annotation.metadata,
+                votes=annotation.votes,
             )
         )
     return exported
