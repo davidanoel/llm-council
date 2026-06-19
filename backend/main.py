@@ -8,6 +8,7 @@ import io
 import json
 import os
 import uuid
+from contextlib import asynccontextmanager
 from typing import List
 
 from fastapi import Body, FastAPI, HTTPException, Query, Response
@@ -16,7 +17,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import storage
 from .council import run_council
 from .csv_utils import parse_csv_annotations
-from .model_provider import external_calls_disabled, get_model_provider_name
+from .model_provider import (
+    external_calls_disabled,
+    get_model_provider_name,
+    initialize_http_client,
+    close_http_client,
+)
 from .schemas import (
     AnnotationRequest,
     AnnotationResult,
@@ -29,7 +35,17 @@ from .schemas import (
 )
 
 
-app = FastAPI(title="Cybersecurity Prompt Labelling API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage HTTP client lifecycle for connection pooling."""
+    # Startup
+    await initialize_http_client()
+    yield
+    # Shutdown
+    await close_http_client()
+
+
+app = FastAPI(title="Cybersecurity Prompt Labelling API", lifespan=lifespan)
 MAX_PROMPT_CONCURRENCY = int(os.getenv("MAX_PROMPT_CONCURRENCY", "5"))
 
 app.add_middleware(

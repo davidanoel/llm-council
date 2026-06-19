@@ -7,7 +7,7 @@ from collections import Counter
 from typing import Any, Dict, List, Optional
 
 from .model_provider import get_council_models, get_provider
-from .policy import HIGH_SEVERITY_UNSAFE_CATEGORIES
+from .policy import AMBIGUITY_TERMS, HIGH_SEVERITY_UNSAFE_CATEGORIES
 from .schemas import CouncilDecision, ModelVote
 
 
@@ -36,22 +36,26 @@ def aggregate_votes(prompt_id: str, votes: List[ModelVote]) -> CouncilDecision:
     if len(votes) != 3:
         return human_review(prompt_id, "Expected three independent model votes.", votes)
 
-    if any(vote.parse_error for vote in votes):
-        return human_review(prompt_id, "One or more model provider calls failed.", votes)
+    # Filter out failed votes; only return human_review if all votes failed or too few succeeded
+    successful_votes = [vote for vote in votes if not vote.parse_error]
+    if len(successful_votes) < 2:
+        return human_review(prompt_id, "Insufficient successful provider calls for decision.", votes)
 
-    safe_votes = [vote for vote in votes if vote.label == "safe"]
-    unsafe_votes = [vote for vote in votes if vote.label == "unsafe"]
+    safe_votes = [vote for vote in successful_votes if vote.label == "safe"]
+    unsafe_votes = [vote for vote in successful_votes if vote.label == "unsafe"]
     serious_unsafe_signal = any(
         vote.unsafe_category in HIGH_SEVERITY_UNSAFE_CATEGORIES
-        for vote in votes
+        for vote in successful_votes
     )
     policy_sensitive_signal = any(
-        vote.ambiguous_terms or "ambiguous_authorization" in vote.policy_triggers
-        for vote in votes
+        ("ambiguous_authorization" in vote.policy_triggers or any(
+            term in AMBIGUITY_TERMS for term in vote.ambiguous_terms
+        ))
+        for vote in successful_votes
     )
 
     if (
-        len(safe_votes) == 3
+        len(safe_votes) >= 2 and len(unsafe_votes) == 0
         and average_confidence(safe_votes) >= AUTO_SAFE_THRESHOLD
         and not serious_unsafe_signal
         and not policy_sensitive_signal
@@ -61,7 +65,7 @@ def aggregate_votes(prompt_id: str, votes: List[ModelVote]) -> CouncilDecision:
             final_label="safe",
             unsafe_category="none",
             confidence=round(average_confidence(safe_votes), 2),
-            rationale="All three independent annotators voted safe with sufficient confidence.",
+            rationale=f"{len(safe_votes)} independent annotators voted safe with sufficient confidence.",
             human_review_reason=None,
             decision_type="auto_safe",
         )

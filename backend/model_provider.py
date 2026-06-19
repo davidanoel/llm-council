@@ -5,6 +5,7 @@ import json
 import os
 import re
 from typing import Any, Dict, List, Optional
+from typing import Union
 
 import httpx
 from dotenv import load_dotenv
@@ -15,6 +16,9 @@ from .schemas import ModelVote
 
 
 load_dotenv()
+
+# Module-level persistent HTTP client for connection pooling and reuse
+_http_client: Optional[httpx.AsyncClient] = None
 
 DEFAULT_COUNCIL_MODELS = ["chatgpt-5.1", "gemini-3.1-pro", "claude-sonnet-4.5"]
 LABELS = ["safe", "unsafe", "needs_human_review"]
@@ -233,31 +237,59 @@ def build_internal_headers(model_name: str, api_key: Optional[str] = None) -> Di
     return headers
 
 
-async def post_json(
-    url: str,
-    payload: Dict[str, Any],
-    model_name: str,
-    api_key: Optional[str] = None,
-) -> Dict[str, Any]:
-    """POST JSON to an internal model endpoint."""
+async def initialize_http_client() -> None:
+    """Initialize the module-level persistent HTTP client."""
+
+    global _http_client
+    if _http_client is not None:
+        return  # Already initialized
 
     try:
         from .utils import root_ca_path
     except ImportError as exc:
         missing_module = exc.name or str(exc)
         raise RuntimeError(f"Internal CA dependency is unavailable: {missing_module}") from exc
-    
-    # todo: remove after testing
-    print(f"Posting to {url} with payload: {payload} and headers: {build_internal_headers(model_name, api_key)}")
 
-    async with httpx.AsyncClient(timeout=60.0, verify=root_ca_path) as client:
-        response = await client.post(
-            url,
-            headers=build_internal_headers(model_name, api_key),
-            json=payload,
-        )
-        response.raise_for_status()
-        return response.json()
+    _http_client = httpx.AsyncClient(
+        timeout=60.0,
+        verify=root_ca_path,
+        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+    )
+
+
+async def close_http_client() -> None:
+    """Close the module-level persistent HTTP client."""
+
+    global _http_client
+    if _http_client is not None:
+        await _http_client.aclose()
+        _http_client = None
+
+
+async def get_http_client() -> httpx.AsyncClient:
+    """Get the module-level persistent HTTP client, initializing if needed."""
+
+    if _http_client is None:
+        await initialize_http_client()
+    return _http_client
+
+
+async def post_json(
+    url: str,
+    payload: Dict[str, Any],
+    model_name: str,
+    api_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    """POST JSON to an internal model endpoint using the shared HTTP client."""
+
+    client = await get_http_client()
+    response = await client.post(
+        url,
+        headers=build_internal_headers(model_name, api_key),
+        json=payload,
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 async def call_model(model_name: str, system_prompt: str, user_prompt: str, output_kind: str, api_key: Optional[str] = None) -> str:
@@ -281,6 +313,7 @@ async def call_model(model_name: str, system_prompt: str, user_prompt: str, outp
         extractor = extract_generic_text
 
     response_json = await post_json(get_model_url(model_name), payload, model_name, api_key)
+    print(f"Model response JSON for {model_name}: {response_json}")
     return extractor(response_json)
 
 
@@ -380,12 +413,60 @@ def parse_model_vote_json(prompt_id: str, model_name: str, raw_text: str) -> Mod
         data = json.loads(raw_text)
         data.setdefault("prompt_id", prompt_id)
         data.setdefault("model_name", model_name)
+        
+        # Normalize text confidence levels to numeric values
+        if "confidence" in data and isinstance(data["confidence"], str):
+            data["confidence"] = normalize_confidence(data["confidence"])
+        
         return ModelVote(**data)
     except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
         return fail_closed_vote(
             prompt_id,
             model_name,
             f"Provider returned invalid annotation JSON: {exc}",
+        def normalize_confidence(value: Union[str, float]) -> float:
+            """Convert text confidence levels to numeric [0, 1] range."""
+    
+            if isinstance(value, (int, float)):
+                # Clamp to valid range
+                return max(0.0, min(1.0, float(value)))
+    
+            if not isinstance(value, str):
+                return 0.0
+    
+            text = value.strip().lower()
+    
+            # Direct text-to-float mappings
+            text_to_confidence = {
+                "very_low": 0.1,
+                "very low": 0.1,
+                "verylow": 0.1,
+                "low": 0.25,
+                "medium_low": 0.4,
+                "medium low": 0.4,
+                "mediumlow": 0.4,
+                "medium": 0.5,
+                "medium_high": 0.65,
+                "medium high": 0.65,
+                "mediumhigh": 0.65,
+                "high": 0.85,
+                "very_high": 0.95,
+                "very high": 0.95,
+                "veryhigh": 0.95,
+                "certain": 0.95,
+                "uncertain": 0.5,
+            }
+    
+            if text in text_to_confidence:
+                return text_to_confidence[text]
+    
+            # Try to parse as float
+            try:
+                return max(0.0, min(1.0, float(text)))
+            except ValueError:
+                # Default to 0.5 (neutral) if unparseable
+                return 0.5
+
         )
 
 

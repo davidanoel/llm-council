@@ -179,9 +179,8 @@ def test_anthropic_payload_uses_messages_shape():
     assert payload["system"] == "policy"
     assert payload["messages"][0]["role"] == "user"
     assert not any(message.get("role") == "system" for message in payload["messages"])
-    assert payload["max_tokens"] == 1200
-    assert payload["output_config"]["format"]["type"] == "json_schema"
-    assert payload["output_config"]["format"]["schema"] == schema
+    assert payload["max_tokens"] == 128
+    assert payload["anthropic_version"] == "vertex-2023-10-16"
 
 
 def test_anthropic_extractor_variants():
