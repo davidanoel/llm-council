@@ -1,5 +1,4 @@
 """Model provider abstraction for local and future internal model APIs."""
-
 from __future__ import annotations
 
 import json
@@ -8,8 +7,11 @@ import re
 from typing import Any, Dict, List, Optional
 
 import httpx
+from amexcerts import certificate_path
 from dotenv import load_dotenv
 from pydantic import ValidationError
+
+from backend.utils import get_a2a_jwt_token
 
 from .policy import AMBIGUITY_TERMS, CYBERSECURITY_POLICY
 from .schemas import ModelVote, PeerCritique
@@ -181,32 +183,22 @@ def build_openai_payload(
     output_schema: Dict[str, Any],
     schema_name: str,
 ) -> Dict[str, Any]:
-    """Build an OpenAI Responses API style payload."""
+    """Build an OpenAI Chat Completions API style payload."""
 
+    del model_name, output_schema, schema_name
     return {
-        "model": model_name,
-        "input": [
+        "messages": [
             {
                 "role": "system",
-                "content": [{"type": "input_text", "text": system_prompt}],
+                "content": system_prompt,
             },
             {
                 "role": "user",
-                "content": [{"type": "input_text", "text": user_prompt}],
+                "content": user_prompt,
             },
         ],
-        "temperature": 0,
-        "max_output_tokens": 1200,
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": schema_name,
-                "schema": output_schema,
-                "strict": True,
-            }
-        },
+        "response_format": {"type": "json_object"},
     }
-
 
 def build_gemini_payload(
     model_name: str,
@@ -280,30 +272,30 @@ def build_generic_payload(model_name: str, system_prompt: str, user_prompt: str)
     }
 
 
-def build_internal_headers() -> Dict[str, str]:
+def build_internal_headers(api_key: Optional[str] = None) -> Dict[str, str]:
     """Build internal request headers with optional bearer auth."""
 
     headers = {"Content-Type": "application/json"}
-    api_key = os.getenv("INTERNAL_MODEL_API_KEY")
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     return headers
 
 
-async def post_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+async def post_json(url: str, payload: Dict[str, Any], api_key: Optional[str] = None) -> Dict[str, Any]:
     """POST JSON to an internal model endpoint."""
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    root_ca_path = certificate_path()
+    async with httpx.AsyncClient(timeout=60.0, verify=root_ca_path) as client:
         response = await client.post(
             url,
-            headers=build_internal_headers(),
+            headers=build_internal_headers(api_key),
             json=payload,
         )
         response.raise_for_status()
         return response.json()
 
 
-async def call_model(model_name: str, system_prompt: str, user_prompt: str, output_kind: str) -> str:
+async def call_model(model_name: str, system_prompt: str, user_prompt: str, output_kind: str, api_key: Optional[str] = None) -> str:
     """Call an internal model using its provider-compatible adapter."""
 
     family = get_model_family(model_name)
@@ -323,7 +315,7 @@ async def call_model(model_name: str, system_prompt: str, user_prompt: str, outp
         payload = build_generic_payload(model_name, system_prompt, user_prompt)
         extractor = extract_generic_text
 
-    response_json = await post_json(get_model_url(model_name), payload)
+    response_json = await post_json(get_model_url(model_name), payload, api_key)
     return extractor(response_json)
 
 
@@ -559,7 +551,14 @@ class InternalModelProvider(BaseModelProvider):
     """Internal model API adapter."""
 
     def __init__(self) -> None:
+        # Try env var first, fall back to JWT token generation
         self.api_key = os.getenv("INTERNAL_MODEL_API_KEY")
+        if not self.api_key:
+            try:
+                self.api_key = get_a2a_jwt_token()
+            except Exception as exc:
+                # Fall through; will fail closed on annotate/critique
+                pass
 
     def _ready(self) -> bool:
         return not external_calls_disabled()
@@ -571,7 +570,7 @@ class InternalModelProvider(BaseModelProvider):
         del metadata
         try:
             user_prompt = build_annotation_prompt(prompt_text)
-            raw_text = await call_model(model_name, CYBERSECURITY_POLICY, user_prompt, "ModelVote")
+            raw_text = await call_model(model_name, CYBERSECURITY_POLICY, user_prompt, "ModelVote", self.api_key)
             return parse_model_vote_json(prompt_id, model_name, raw_text)
         except Exception as exc:
             return fail_closed_vote(prompt_id, model_name, f"Internal provider call failed: {exc}")
@@ -594,6 +593,7 @@ class InternalModelProvider(BaseModelProvider):
                 CYBERSECURITY_POLICY,
                 build_critique_prompt(prompt_text, votes),
                 "PeerCritique",
+                self.api_key,
             )
             data = json.loads(raw_text)
             data.setdefault("reviewer_model", reviewer_model)
