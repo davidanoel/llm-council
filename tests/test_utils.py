@@ -51,3 +51,14 @@ def test_a2a_token_request_uses_httpx_and_company_ca(monkeypatch):
         assert captured["headers"]["X-Auth-AppID"] == "app"
     finally:
         sys.modules.pop("backend.utils", None)
+
+
+def test_utils_import_without_amexcerts_uses_system_ca(monkeypatch):
+    monkeypatch.setitem(sys.modules, "amexcerts", SimpleNamespace())
+    sys.modules.pop("backend.utils", None)
+    utils = importlib.import_module("backend.utils")
+
+    try:
+        assert utils.root_ca_path is True
+    finally:
+        sys.modules.pop("backend.utils", None)

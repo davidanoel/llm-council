@@ -189,21 +189,15 @@ def build_anthropic_payload(
 
     del schema_name
     return {
-        "model": model_name,
+        "anthropic_version": "vertex-2023-10-16",
         "system": system_prompt,
-        "max_tokens": 1200,
+        "max_tokens": 128,
         "messages": [
             {
                 "role": "user",
                 "content": user_prompt,
             }
-        ],
-        "output_config": {
-            "format": {
-                "type": "json_schema",
-                "schema": output_schema,
-            }
-        },
+        ]
     }
 
 
@@ -252,6 +246,9 @@ async def post_json(
     except ImportError as exc:
         missing_module = exc.name or str(exc)
         raise RuntimeError(f"Internal CA dependency is unavailable: {missing_module}") from exc
+    
+    # todo: remove after testing
+    print(f"Posting to {url} with payload: {payload} and headers: {build_internal_headers(model_name, api_key)}")
 
     async with httpx.AsyncClient(timeout=60.0, verify=root_ca_path) as client:
         response = await client.post(
@@ -491,9 +488,12 @@ class InternalModelProvider(BaseModelProvider):
             return self.api_key
         if not self._a2a_token_attempted:
             self._a2a_token_attempted = True
-            from .utils import get_a2a_jwt_token
+            try:
+                from .utils import get_a2a_jwt_token
 
-            self.api_key = get_a2a_jwt_token()
+                self.api_key = get_a2a_jwt_token()
+            except Exception:
+                self.api_key = None
         return self.api_key
 
     def _ready(self) -> bool:
