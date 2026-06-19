@@ -1,1 +1,1 @@
-"""LLM Council backend package."""
+"""Cyber Annotation Council backend package."""

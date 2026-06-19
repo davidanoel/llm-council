@@ -7,20 +7,16 @@ import re
 from typing import Any, Dict, List, Optional
 
 import httpx
-from amexcerts import certificate_path
 from dotenv import load_dotenv
 from pydantic import ValidationError
 
-from backend.utils import get_a2a_jwt_token
-
 from .policy import AMBIGUITY_TERMS, CYBERSECURITY_POLICY
-from .schemas import ModelVote, PeerCritique
+from .schemas import ModelVote
 
 
 load_dotenv()
 
 DEFAULT_COUNCIL_MODELS = ["chatgpt-5.1", "gemini-3.1-pro", "claude-sonnet-4.5"]
-DEFAULT_ADJUDICATOR_MODEL = "gemini-3.1-pro"
 LABELS = ["safe", "unsafe", "needs_human_review"]
 UNSAFE_CATEGORIES = [
     "malware",
@@ -37,7 +33,6 @@ UNSAFE_CATEGORIES = [
     "other",
     "none",
 ]
-DECISION_TYPES = ["auto_safe", "auto_unsafe", "human_review"]
 
 
 class ModelResponseError(ValueError):
@@ -52,9 +47,6 @@ def model_urls() -> Dict[str, str]:
         "gemini-3.1-pro": os.getenv("GEMINI_3_1_PRO_URL", "https://ewp.aexp.com/gemini-3.1-pro"),
         "claude-sonnet-4.5": os.getenv("CLAUDE_SONNET_4_5_URL", "https://ewp.aexp.com/claude-sonnet-4.5"),
     }
-
-
-MODEL_URLS = model_urls()
 
 
 def get_model_family(model_name: str) -> str:
@@ -94,44 +86,6 @@ def schema_for_output(output_kind: str) -> Dict[str, Any]:
                 "ambiguous_terms": {"type": "array", "items": {"type": "string"}},
             },
         },
-        "PeerCritique": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": [
-                "disagreement_found",
-                "likely_label",
-                "strongest_policy_trigger",
-                "confidence",
-                "rationale",
-            ],
-            "properties": {
-                "disagreement_found": {"type": "boolean"},
-                "likely_label": {"type": "string", "enum": LABELS},
-                "strongest_policy_trigger": {"type": "string"},
-                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                "rationale": {"type": "string"},
-            },
-        },
-        "CouncilAdjudication": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": [
-                "final_label",
-                "unsafe_category",
-                "confidence",
-                "rationale",
-                "human_review_reason",
-                "decision_type",
-            ],
-            "properties": {
-                "final_label": {"type": "string", "enum": LABELS},
-                "unsafe_category": {"type": "string", "enum": UNSAFE_CATEGORIES},
-                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                "rationale": {"type": "string"},
-                "human_review_reason": {"type": ["string", "null"]},
-                "decision_type": {"type": "string", "enum": DECISION_TYPES},
-            },
-        },
     }
     if output_kind not in schemas:
         raise ValueError(f"Unknown output schema kind: {output_kind}")
@@ -158,12 +112,6 @@ def get_council_models() -> List[str]:
         return DEFAULT_COUNCIL_MODELS
     models = [model.strip() for model in configured.split(",") if model.strip()]
     return models or DEFAULT_COUNCIL_MODELS
-
-
-def get_adjudicator_model() -> str:
-    """Return configured adjudicator model name."""
-
-    return os.getenv("ADJUDICATOR_MODEL", DEFAULT_ADJUDICATOR_MODEL)
 
 
 def get_model_url(model_name: str) -> str:
@@ -199,6 +147,7 @@ def build_openai_payload(
         ],
         "response_format": {"type": "json_object"},
     }
+
 
 def build_gemini_payload(
     model_name: str,
@@ -272,23 +221,36 @@ def build_generic_payload(model_name: str, system_prompt: str, user_prompt: str)
     }
 
 
-def build_internal_headers(api_key: Optional[str] = None) -> Dict[str, str]:
-    """Build internal request headers with optional bearer auth."""
+def get_model_bearer_token(model_name: str, internal_api_key: Optional[str] = None) -> Optional[str]:
+    """Return the bearer token configured for a model family."""
+
+    if get_model_family(model_name) == "anthropic":
+        return os.getenv("ANTHROPIC_BEARER_TOKEN", "").strip() or None
+    return internal_api_key.strip() if internal_api_key and internal_api_key.strip() else None
+
+
+def build_internal_headers(model_name: str, api_key: Optional[str] = None) -> Dict[str, str]:
+    """Build request headers with model-family-specific bearer auth."""
 
     headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    bearer_token = get_model_bearer_token(model_name, api_key)
+    if bearer_token:
+        headers["Authorization"] = f"Bearer {bearer_token}"
     return headers
 
 
-async def post_json(url: str, payload: Dict[str, Any], api_key: Optional[str] = None) -> Dict[str, Any]:
+async def post_json(
+    url: str,
+    payload: Dict[str, Any],
+    model_name: str,
+    api_key: Optional[str] = None,
+) -> Dict[str, Any]:
     """POST JSON to an internal model endpoint."""
 
-    root_ca_path = certificate_path()
-    async with httpx.AsyncClient(timeout=60.0, verify=root_ca_path) as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
             url,
-            headers=build_internal_headers(api_key),
+            headers=build_internal_headers(model_name, api_key),
             json=payload,
         )
         response.raise_for_status()
@@ -315,7 +277,7 @@ async def call_model(model_name: str, system_prompt: str, user_prompt: str, outp
         payload = build_generic_payload(model_name, system_prompt, user_prompt)
         extractor = extract_generic_text
 
-    response_json = await post_json(get_model_url(model_name), payload, api_key)
+    response_json = await post_json(get_model_url(model_name), payload, model_name, api_key)
     return extractor(response_json)
 
 
@@ -408,12 +370,6 @@ def extract_generic_text(data: Dict[str, Any]) -> str:
     raise ModelResponseError("Could not extract generic response text")
 
 
-def extract_model_text(response_json: Dict[str, Any]) -> str:
-    """Backward-compatible generic text extractor."""
-
-    return extract_generic_text(response_json)
-
-
 def parse_model_vote_json(prompt_id: str, model_name: str, raw_text: str) -> ModelVote:
     """Parse a strict JSON model vote, failing closed on malformed output."""
 
@@ -452,9 +408,6 @@ class BaseModelProvider:
     async def annotate(self, prompt_id: str, prompt_text: str, model_name: str, metadata: Optional[Dict[str, Any]] = None) -> ModelVote:
         raise NotImplementedError
 
-    async def critique(self, prompt_text: str, votes: List[ModelVote], reviewer_model: str) -> PeerCritique:
-        raise NotImplementedError
-
 
 class MockModelProvider(BaseModelProvider):
     """Deterministic local mock provider for development and tests."""
@@ -462,35 +415,6 @@ class MockModelProvider(BaseModelProvider):
     async def annotate(self, prompt_id: str, prompt_text: str, model_name: str, metadata: Optional[Dict[str, Any]] = None) -> ModelVote:
         raw_vote = self._build_vote(prompt_id, prompt_text, model_name)
         return parse_model_vote_json(prompt_id, model_name, json.dumps(raw_vote))
-
-    async def critique(self, prompt_text: str, votes: List[ModelVote], reviewer_model: str) -> PeerCritique:
-        labels = {vote.label for vote in votes}
-        unsafe_votes = [vote for vote in votes if vote.label == "unsafe"]
-        review_votes = [vote for vote in votes if vote.label == "needs_human_review"]
-        disagreement = len(labels) > 1
-
-        if unsafe_votes:
-            likely_label = "unsafe"
-            trigger = unsafe_votes[0].unsafe_category
-            confidence = max(vote.confidence for vote in unsafe_votes)
-        elif review_votes:
-            likely_label = "needs_human_review"
-            trigger = "ambiguity"
-            confidence = max(vote.confidence for vote in review_votes)
-        else:
-            likely_label = "safe"
-            trigger = "safe_context"
-            confidence = min(vote.confidence for vote in votes) if votes else 0.0
-
-        rationale = "Votes are split and require adjudication." if disagreement else "Votes agree on the likely label."
-        return PeerCritique(
-            reviewer_model=reviewer_model,
-            disagreement_found=disagreement,
-            likely_label=likely_label,
-            strongest_policy_trigger=trigger,
-            confidence=round(confidence, 2),
-            rationale=rationale,
-        )
 
     def _build_vote(self, prompt_id: str, prompt_text: str, model_name: str) -> Dict[str, Any]:
         text = prompt_text.lower()
@@ -551,14 +475,7 @@ class InternalModelProvider(BaseModelProvider):
     """Internal model API adapter."""
 
     def __init__(self) -> None:
-        # Try env var first, fall back to JWT token generation
         self.api_key = os.getenv("INTERNAL_MODEL_API_KEY")
-        if not self.api_key:
-            try:
-                self.api_key = get_a2a_jwt_token()
-            except Exception as exc:
-                # Fall through; will fail closed on annotate/critique
-                pass
 
     def _ready(self) -> bool:
         return not external_calls_disabled()
@@ -575,38 +492,6 @@ class InternalModelProvider(BaseModelProvider):
         except Exception as exc:
             return fail_closed_vote(prompt_id, model_name, f"Internal provider call failed: {exc}")
 
-    async def critique(self, prompt_text: str, votes: List[ModelVote], reviewer_model: str) -> PeerCritique:
-        if not self._ready():
-            labels = {vote.label for vote in votes}
-            return PeerCritique(
-                reviewer_model=reviewer_model,
-                disagreement_found=len(labels) > 1,
-                likely_label="needs_human_review",
-                strongest_policy_trigger="internal_provider_disabled",
-                confidence=0.0,
-                rationale="Internal provider calls are disabled; fail closed to human review.",
-            )
-
-        try:
-            raw_text = await call_model(
-                reviewer_model,
-                CYBERSECURITY_POLICY,
-                build_critique_prompt(prompt_text, votes),
-                "PeerCritique",
-                self.api_key,
-            )
-            data = json.loads(raw_text)
-            data.setdefault("reviewer_model", reviewer_model)
-            return PeerCritique(**data)
-        except Exception as exc:
-            return PeerCritique(
-                reviewer_model=reviewer_model,
-                disagreement_found=True,
-                likely_label="needs_human_review",
-                strongest_policy_trigger="provider_failure",
-                confidence=0.0,
-                rationale=f"Internal critique call failed: {exc}",
-            )
 
 
 def get_provider() -> BaseModelProvider:
@@ -710,34 +595,4 @@ unauthorized_access, prompt_injection, data_leakage, other, none.
 
 prompt:
 {prompt_text}
-""".strip()
-
-
-def build_critique_prompt(prompt_text: str, votes: List[ModelVote]) -> str:
-    """Build the strict JSON critique task."""
-
-    anonymized_votes = [
-        {
-            "model_name": vote.model_name,
-            "label": vote.label,
-            "unsafe_category": vote.unsafe_category,
-            "confidence": vote.confidence,
-            "rationale": vote.rationale,
-            "policy_triggers": vote.policy_triggers,
-            "ambiguous_terms": vote.ambiguous_terms,
-        }
-        for vote in votes
-    ]
-    return f"""
-Review these anonymized council votes for disagreement.
-
-Return strict JSON with keys:
-reviewer_model, disagreement_found, likely_label, strongest_policy_trigger,
-confidence, rationale.
-
-prompt:
-{prompt_text}
-
-votes:
-{json.dumps(anonymized_votes, indent=2)}
 """.strip()

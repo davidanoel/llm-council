@@ -30,7 +30,7 @@ export const api = {
   },
 
   annotateBatch(prompts) {
-    return request('/api/annotate/batch-with-progress', {
+    return request('/api/annotate/batch', {
       method: 'POST',
       body: JSON.stringify({ prompts }),
     });
@@ -44,12 +44,16 @@ export const api = {
     });
   },
 
-  listAnnotations() {
-    return request('/api/annotations');
+  validateCsv(csvText) {
+    return request('/api/annotate/csv/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/csv' },
+      body: csvText,
+    });
   },
 
-  getAnnotation(promptId) {
-    return request(`/api/annotations/${encodeURIComponent(promptId)}`);
+  listAnnotations() {
+    return request('/api/annotations');
   },
 
   reviewQueue() {
@@ -74,12 +78,5 @@ export const api = {
       throw new Error(detail || `Request failed: ${response.status}`);
     }
     return response.blob();
-  },
-
-  evaluate(labels) {
-    return request('/api/evaluate', {
-      method: 'POST',
-      body: JSON.stringify({ labels }),
-    });
   },
 };

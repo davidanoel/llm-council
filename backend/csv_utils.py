@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 from typing import List
@@ -23,7 +24,7 @@ def parse_csv_annotations(csv_text: str) -> List[AnnotationRequest]:
         if not prompt:
             continue
 
-        prompt_id = (row.get("prompt_id") or "").strip() or f"row_{index}"
+        prompt_id = (row.get("prompt_id") or "").strip() or deterministic_prompt_id(prompt)
         metadata = parse_metadata(row.get("metadata"))
         requests.append(
             AnnotationRequest(
@@ -34,6 +35,13 @@ def parse_csv_annotations(csv_text: str) -> List[AnnotationRequest]:
         )
 
     return requests
+
+
+def deterministic_prompt_id(prompt: str) -> str:
+    """Build a stable ID that does not collide between unrelated CSV uploads."""
+
+    digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
+    return f"prompt_{digest}"
 
 
 def parse_metadata(raw_metadata: str | None) -> dict:

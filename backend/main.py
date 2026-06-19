@@ -16,7 +16,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import storage
 from .council import run_council
 from .csv_utils import parse_csv_annotations
-from .evaluation import evaluate_predictions
 from .model_provider import external_calls_disabled, get_model_provider_name
 from .schemas import (
     AnnotationRequest,
@@ -24,8 +23,6 @@ from .schemas import (
     BatchAnnotationResponse,
     BatchAnnotationRequest,
     BatchProgress,
-    EvaluationMetrics,
-    EvaluationRequest,
     ExportedLabel,
     HumanReviewRequest,
     utc_now,
@@ -64,13 +61,12 @@ async def annotate(request: AnnotationRequest) -> AnnotationResult:
     prompt_id = request.prompt_id or str(uuid.uuid4())
     existing = storage.load_annotation(prompt_id)
     created_at = existing.created_at if existing else utc_now()
-    votes, critiques, adjudication = await run_council(prompt_id, request.prompt_text, request.metadata)
+    votes, adjudication = await run_council(prompt_id, request.prompt_text, request.metadata)
     result = AnnotationResult(
         prompt_id=prompt_id,
         prompt_text=request.prompt_text,
         metadata=request.metadata,
         votes=votes,
-        critiques=critiques,
         adjudication=adjudication,
         human_reviews=existing.human_reviews if existing else [],
         created_at=created_at,
@@ -79,15 +75,7 @@ async def annotate(request: AnnotationRequest) -> AnnotationResult:
     return storage.save_annotation(result)
 
 
-@app.post("/api/annotate/batch", response_model=List[AnnotationResult])
-async def annotate_batch_legacy(request: BatchAnnotationRequest) -> List[AnnotationResult]:
-    """Deprecated compatibility endpoint shape."""
-
-    response = await run_annotation_batch(request.prompts)
-    return response.results
-
-
-@app.post("/api/annotate/batch-with-progress", response_model=BatchAnnotationResponse)
+@app.post("/api/annotate/batch", response_model=BatchAnnotationResponse)
 async def annotate_batch(request: BatchAnnotationRequest) -> BatchAnnotationResponse:
     """Annotate and store multiple prompts."""
 
@@ -104,6 +92,17 @@ async def annotate_csv(csv_text: str = Body(..., media_type="text/csv")) -> Batc
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
     return await run_annotation_batch(prompts)
+
+
+@app.post("/api/annotate/csv/validate")
+async def validate_annotation_csv(csv_text: str = Body(..., media_type="text/csv")) -> dict:
+    """Validate CSV input and return a lightweight preview summary."""
+
+    try:
+        prompts = parse_csv_annotations(csv_text)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    return {"valid_rows": len(prompts)}
 
 
 async def run_annotation_batch(prompts: List[AnnotationRequest]) -> BatchAnnotationResponse:
@@ -155,16 +154,6 @@ async def list_annotations() -> List[AnnotationResult]:
     """List stored annotations."""
 
     return storage.list_annotations()
-
-
-@app.get("/api/annotations/{prompt_id}", response_model=AnnotationResult)
-async def get_annotation(prompt_id: str) -> AnnotationResult:
-    """Get one stored annotation."""
-
-    annotation = storage.load_annotation(prompt_id)
-    if annotation is None:
-        raise HTTPException(status_code=404, detail="Annotation not found")
-    return annotation
 
 
 @app.get("/api/review-queue", response_model=List[AnnotationResult])
@@ -232,14 +221,6 @@ def labels_to_csv(labels: List[ExportedLabel]) -> str:
             }
         )
     return output.getvalue()
-
-
-@app.post("/api/evaluate", response_model=EvaluationMetrics)
-async def evaluate(request: EvaluationRequest) -> EvaluationMetrics:
-    """Evaluate exported labels against supplied human-majority labels."""
-
-    gold = {item.prompt_id: item.label for item in request.labels}
-    return evaluate_predictions(storage.export_labels(), gold)
 
 
 if __name__ == "__main__":

@@ -10,11 +10,11 @@ from backend.model_provider import (
     build_annotation_prompt,
     build_anthropic_payload,
     build_gemini_payload,
+    build_internal_headers,
     build_openai_payload,
     extract_anthropic_text,
     extract_gemini_text,
     extract_openai_text,
-    extract_model_text,
     get_model_family,
     get_model_url,
     parse_model_vote_json,
@@ -98,32 +98,12 @@ def test_annotation_prompt_excludes_local_ids_and_metadata():
     assert "Classify this transaction review workflow." in prompt
 
 
-def test_extract_model_text_variants():
-    payload = json.dumps({"label": "safe"})
-
-    assert extract_model_text({"choices": [{"message": {"content": payload}}]}) == payload
-    assert extract_model_text({"content": payload}) == payload
-    assert extract_model_text({"output": payload}) == payload
-    assert extract_model_text({"message": {"content": payload}}) == payload
-
-
-def test_extract_model_text_unknown_shape_raises_clean_error():
-    with pytest.raises(ModelResponseError, match="generic response text"):
-        extract_model_text({"unexpected": "shape"})
-
-
-def test_openai_payload_uses_responses_shape():
+def test_openai_payload_uses_chat_shape():
     schema = schema_for_output("ModelVote")
     payload = build_openai_payload("chatgpt-5.1", "policy", "classify this", schema, "ModelVote")
 
-    assert "input" in payload
-    assert "messages" not in payload
-    assert [item["role"] for item in payload["input"]] == ["system", "user"]
-    assert payload["input"][0]["content"][0]["type"] == "input_text"
-    assert payload["input"][1]["content"][0]["type"] == "input_text"
-    assert payload["text"]["format"]["type"] == "json_schema"
-    assert payload["text"]["format"]["schema"] == schema
-    assert payload["text"]["format"]["strict"] is True
+    assert [item["role"] for item in payload["messages"]] == ["system", "user"]
+    assert payload["response_format"] == {"type": "json_object"}
 
 
 def test_openai_extractor_variants():
@@ -140,8 +120,8 @@ def test_openai_extractor_unknown_shape_raises_clean_error():
 
 
 def test_gemini_payload_uses_generate_content_shape():
-    schema = schema_for_output("PeerCritique")
-    payload = build_gemini_payload("gemini-3.1-pro", "policy", "critique this", schema, "PeerCritique")
+    schema = schema_for_output("ModelVote")
+    payload = build_gemini_payload("gemini-3.1-pro", "policy", "classify this", schema, "ModelVote")
 
     assert "contents" in payload
     assert payload["contents"][0]["role"] == "user"
@@ -164,8 +144,8 @@ def test_gemini_extractor_unknown_shape_raises_clean_error():
 
 
 def test_anthropic_payload_uses_messages_shape():
-    schema = schema_for_output("CouncilAdjudication")
-    payload = build_anthropic_payload("claude-sonnet-4.5", "policy", "adjudicate this", schema, "CouncilAdjudication")
+    schema = schema_for_output("ModelVote")
+    payload = build_anthropic_payload("claude-sonnet-4.5", "policy", "classify this", schema, "ModelVote")
 
     assert payload["system"] == "policy"
     assert payload["messages"][0]["role"] == "user"
@@ -192,3 +172,33 @@ def test_known_models_route_to_provider_families():
     assert get_model_family("chatgpt-5.1") == "openai"
     assert get_model_family("gemini-3.1-pro") == "gemini"
     assert get_model_family("claude-sonnet-4.5") == "anthropic"
+
+
+def test_anthropic_headers_use_dedicated_bearer_token(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BEARER_TOKEN", "claude-token")
+
+    headers = build_internal_headers("claude-sonnet-4.5", "generic-token")
+
+    assert headers == {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer claude-token",
+    }
+
+
+def test_non_anthropic_headers_use_internal_api_key(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BEARER_TOKEN", "claude-token")
+
+    headers = build_internal_headers("gemini-3.1-pro", "generic-token")
+
+    assert headers == {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer generic-token",
+    }
+
+
+def test_anthropic_headers_do_not_fall_back_to_internal_api_key(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_BEARER_TOKEN", raising=False)
+
+    headers = build_internal_headers("claude-sonnet-4.5", "generic-token")
+
+    assert headers == {"Content-Type": "application/json"}

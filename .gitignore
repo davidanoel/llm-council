@@ -15,6 +15,7 @@ wheels/
 # Data files
 data/*
 !data/demo_prompts.json
+!data/demo_prompts.csv
 
 # Frontend
 frontend/node_modules/

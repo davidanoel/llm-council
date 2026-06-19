@@ -70,7 +70,6 @@ def add_human_review(request: HumanReviewRequest) -> AnnotationResult:
             unsafe_category=request.unsafe_category,
             rationale=request.rationale,
             reviewer=request.reviewer,
-            notes=request.notes,
             reviewed_at=utc_now(),
         )
     )

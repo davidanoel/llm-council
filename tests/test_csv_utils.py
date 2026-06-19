@@ -20,4 +20,6 @@ def test_csv_parsing_missing_prompt_column():
 def test_csv_rows_without_prompt_id_get_deterministic_ids():
     records = parse_csv_annotations("prompt\nfirst prompt\nsecond prompt\n")
 
-    assert [record.prompt_id for record in records] == ["row_1", "row_2"]
+    assert all(record.prompt_id.startswith("prompt_") for record in records)
+    assert records[0].prompt_id != records[1].prompt_id
+    assert records[0].prompt_id == parse_csv_annotations("prompt\nfirst prompt\n")[0].prompt_id

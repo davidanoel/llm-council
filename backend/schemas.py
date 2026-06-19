@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 
 Label = Literal["safe", "unsafe", "needs_human_review"]
+HumanLabel = Literal["safe", "unsafe"]
 UnsafeCategory = Literal[
     "malware",
     "credential_theft",
@@ -74,19 +75,8 @@ class ModelVote(BaseModel):
     parse_error: Optional[str] = None
 
 
-class PeerCritique(BaseModel):
-    """A peer critique over anonymized model votes."""
-
-    reviewer_model: str
-    disagreement_found: bool
-    likely_label: Label
-    strongest_policy_trigger: str
-    confidence: float = Field(..., ge=0.0, le=1.0)
-    rationale: str
-
-
-class CouncilAdjudication(BaseModel):
-    """Final council decision before any human override."""
+class CouncilDecision(BaseModel):
+    """Deterministic council decision before any human override."""
 
     prompt_id: str
     final_label: Label
@@ -101,21 +91,19 @@ class HumanReviewRequest(BaseModel):
     """Human override for a prompt annotation."""
 
     prompt_id: str
-    label: Label
+    label: HumanLabel
     unsafe_category: UnsafeCategory = "none"
     rationale: Optional[str] = None
     reviewer: str = "local-user"
-    notes: Optional[str] = None
 
 
 class HumanReview(BaseModel):
     """Stored human review record."""
 
-    label: Label
+    label: HumanLabel
     unsafe_category: UnsafeCategory = "none"
     rationale: Optional[str] = None
     reviewer: str
-    notes: Optional[str] = None
     reviewed_at: str
 
 
@@ -126,8 +114,7 @@ class AnnotationResult(BaseModel):
     prompt_text: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
     votes: List[ModelVote] = Field(default_factory=list)
-    critiques: List[PeerCritique] = Field(default_factory=list)
-    adjudication: Optional[CouncilAdjudication] = None
+    adjudication: Optional[CouncilDecision] = None
     human_reviews: List[HumanReview] = Field(default_factory=list)
     created_at: str
     updated_at: str
@@ -143,37 +130,6 @@ class ExportedLabel(BaseModel):
     unsafe_category: UnsafeCategory = "none"
     prompt_text: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
-
-
-class EvaluationItem(BaseModel):
-    """One gold label item for evaluation."""
-
-    prompt_id: str
-    label: Label
-
-
-class EvaluationRequest(BaseModel):
-    """Evaluate stored predictions against human-majority labels."""
-
-    labels: List[EvaluationItem]
-
-
-class EvaluationMetrics(BaseModel):
-    """Binary unsafe-vs-safe metrics with abstention reported separately."""
-
-    confusion_matrix: Dict[str, int]
-    accuracy: Optional[float]
-    unsafe_precision: Optional[float]
-    unsafe_recall: Optional[float]
-    unsafe_f1: Optional[float]
-    mcc: Optional[float]
-    false_positive_rate: Optional[float]
-    false_negative_rate: Optional[float]
-    abstention_rate: float
-    coverage_rate: float
-    total: int
-    covered: int
-    abstained: int
 
 
 def utc_now() -> str:

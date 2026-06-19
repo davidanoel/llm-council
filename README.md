@@ -1,120 +1,81 @@
 # Cyber Annotation Council
 
-Cyber Annotation Council is a local prompt labelling tool for cybersecurity safety review. It classifies prompts as:
+Cyber Annotation Council labels cybersecurity prompts as:
 
 - `safe`
 - `unsafe`
 - `needs_human_review`
 
-The app uses a simple council pattern:
+It is a local FastAPI and React/Vite application for batch annotation, human review, and label export.
 
-1. Independent model votes.
-2. Peer critique/disagreement pass.
-3. Final adjudication.
-4. Optional human override.
-5. Label export.
-6. Evaluation against human-majority labels.
+## Decision Model
 
-The backend is FastAPI. The frontend is React/Vite. Local storage is JSON files in `data/annotations/`.
+Three AI annotators classify each prompt independently. Their identities and outputs do not influence one another.
+
+The backend then applies deterministic rules:
+
+- **Auto-safe:** all three vote safe, average confidence passes the safe threshold, and no serious or ambiguous policy signal is raised.
+- **Auto-unsafe:** at least two vote unsafe, average unsafe confidence passes the unsafe threshold, and the unsafe category agrees.
+- **Human review:** every other vote pattern, provider failure, ambiguity, or low-confidence result.
+
+There is no AI judge. Unresolved cases go to a human reviewer rather than giving one annotating model additional authority.
 
 ## Privacy
 
-The default provider configuration is `internal` and points at company model URLs under `https://ewp.aexp.com/<modelname>`.
+Only prompt text is sent to model providers. Prompt IDs and metadata remain local.
 
-Never send real company prompts, customer data, secrets, logs, source code, incident data, or internal system details to external APIs without explicit approval.
-
-For purely local development, set `MODEL_PROVIDER=mock` and `DISABLE_EXTERNAL_CALLS=true`.
+Never send real company prompts, customer data, secrets, logs, source code, or incident data to unapproved APIs.
 
 ## Setup
 
-Install backend dependencies:
-
 ```bash
 uv sync
-```
-
-Install frontend dependencies:
-
-```bash
-cd frontend
-npm install
-cd ..
-```
-
-Copy local environment defaults:
-
-```bash
+cd frontend && npm install && cd ..
 cp .env.example .env
 ```
 
-## Run Backend
+For local mock development:
 
-```bash
-uv run python -m backend.main
-```
-
-Backend health:
-
-```bash
-curl http://localhost:8001/api/health
-```
-
-## Run Frontend
-
-```bash
-cd frontend
-npm run dev
-```
-
-Open `http://localhost:5173`.
-
-## Internal Provider
-
-Default internal configuration:
-
-```bash
-MODEL_PROVIDER=internal
-COUNCIL_MODELS=chatgpt-5.1,gemini-3.1-pro,claude-sonnet-4.5
-ADJUDICATOR_MODEL=gemini-3.1-pro
-CHATGPT_5_1_URL=https://ewp.aexp.com/chatgpt-5.1
-GEMINI_3_1_PRO_URL=https://ewp.aexp.com/gemini-3.1-pro
-CLAUDE_SONNET_4_5_URL=https://ewp.aexp.com/claude-sonnet-4.5
-```
-
-Optional bearer auth:
-
-```bash
-INTERNAL_MODEL_API_KEY=
-```
-
-## Mock Provider
-
-The mock provider is deterministic and synthetic. It is intended for UI development, storage testing, and evaluation plumbing.
-
-```bash
+```env
 MODEL_PROVIDER=mock
 DISABLE_EXTERNAL_CALLS=true
 ```
 
-## Annotate One Prompt
+The default internal annotators are:
 
-Use the frontend Single Annotation panel or call:
-
-```bash
-curl -X POST http://localhost:8001/api/annotate \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "prompt_id": "demo-safe-port",
-    "prompt_text": "How do I kill port 8080 on my laptop?",
-    "metadata": {"source": "demo"}
-  }'
+```env
+COUNCIL_MODELS=chatgpt-5.1,gemini-3.1-pro,claude-sonnet-4.5
 ```
 
-## Batch Annotate
+Internal ChatGPT and Gemini requests use `INTERNAL_MODEL_API_KEY` when set. Claude requests use the separate `ANTHROPIC_BEARER_TOKEN` as an `Authorization: Bearer` header. Keep both values in `.env`; never commit tokens.
 
-CSV upload is the primary batch path in the frontend.
+## Run
 
-Expected CSV format:
+```bash
+./start.sh
+```
+
+Or separately:
+
+```bash
+uv run python -m backend.main
+cd frontend && npm run dev
+```
+
+- Backend: `http://localhost:8001`
+- Frontend: `http://localhost:5173`
+
+## UI Workflow
+
+1. **Annotate:** upload and validate a CSV, then explicitly start annotation. Single-prompt and JSON input are under Advanced.
+2. **Review:** resolve uncertain prompts one at a time and save the human label.
+3. **Results:** filter completed annotations, inspect model votes, and export JSON or CSV.
+
+## CSV Input
+
+Required column: `prompt`
+
+Optional columns: `prompt_id`, `metadata`
 
 ```csv
 prompt_id,prompt,metadata
@@ -122,94 +83,29 @@ p1,How do I kill port 8080?,"{""source"": ""demo""}"
 ,Review synthetic transactions for fraud detection,"{""source"": ""demo""}"
 ```
 
-The `prompt` column is required. `prompt_id` and `metadata` are optional. Missing `prompt_id` values become deterministic IDs such as `row_1`, `row_2`, and so on.
+Missing IDs are generated from a stable hash of prompt text so unrelated uploads do not overwrite one another.
 
-You can also call the CSV endpoint directly:
+Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
 
-```bash
-curl -X POST http://localhost:8001/api/annotate/csv \
-  -H 'Content-Type: text/csv' \
-  --data-binary @prompts.csv
-```
+## API
 
-JSON batch remains available:
+- `GET /api/health`
+- `POST /api/annotate`
+- `POST /api/annotate/batch`
+- `POST /api/annotate/csv/validate`
+- `POST /api/annotate/csv`
+- `GET /api/annotations`
+- `GET /api/review-queue`
+- `POST /api/human-review`
+- `GET /api/export-labels`
+- `GET /api/export-labels.csv`
 
-```bash
-curl -X POST http://localhost:8001/api/annotate/batch \
-  -H 'Content-Type: application/json' \
-  -d '{"prompts": [
-    {
-      "prompt_id": "demo-safe-port",
-      "prompt_text": "How do I kill port 8080 on my laptop?",
-      "metadata": {"source": "demo"}
-    }
-  ]}'
-```
-
-Synthetic demo prompts are available in `data/demo_prompts.json`.
-
-## Review Human Queue
-
-Prompts adjudicated as `human_review` appear at:
-
-```bash
-curl http://localhost:8001/api/review-queue
-```
-
-Save an override:
-
-```bash
-curl -X POST http://localhost:8001/api/human-review \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "prompt_id": "demo-ambiguous-exploit",
-    "label": "needs_human_review",
-    "unsafe_category": "exploit_execution",
-    "rationale": "Authorization is unclear.",
-    "reviewer": "analyst"
-  }'
-```
-
-The frontend clearly separates council label, human override, and final effective label.
-
-## Export Labels
-
-```bash
-curl 'http://localhost:8001/api/export-labels?include_prompt_text=true'
-```
-
-Human overrides take precedence over council labels in export output.
-
-## Evaluate Against Human-Majority Labels
-
-The evaluation API compares stored predictions against supplied gold labels. `unsafe` is positive, `safe` is negative, and `needs_human_review` is treated as abstention.
-
-```bash
-curl -X POST http://localhost:8001/api/evaluate \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "labels": [
-      {"prompt_id": "demo-safe-port", "label": "safe"}
-    ]
-  }'
-```
-
-The frontend Evaluation panel accepts records shaped like:
-
-```json
-[
-  {
-    "prompt_id": "demo-safe-port",
-    "gold_label": "safe",
-    "predicted_label": "safe"
-  }
-]
-```
-
-`predicted_label` is shown for analyst convenience in pasted records; the backend evaluates against stored exported predictions.
+Exports use the latest human label when present.
 
 ## Tests
 
+Run locally without model calls:
+
 ```bash
-uv run pytest -q
+MODEL_PROVIDER=mock DISABLE_EXTERNAL_CALLS=true uv run pytest -q
 ```

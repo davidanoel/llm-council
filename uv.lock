@@ -198,7 +198,7 @@ wheels = [
 ]
 
 [[package]]
-name = "llm-council"
+name = "cyber-annotation-council"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
