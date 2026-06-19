@@ -110,6 +110,7 @@ textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, C
 .metrics-grid > div { display: flex; flex-direction: column; gap: 4px; padding: 10px; border: 1px solid #d5dde5; border-radius: 4px; }
 .summary-grid span,
 .metrics-grid span { color: #607080; font-size: 12px; text-transform: capitalize; }
+.metrics-grid small { color: #607080; font-size: 11px; }
 .warning-text { grid-column: 1 / -1; color: #92400e; }
 
 .advanced-panel summary,

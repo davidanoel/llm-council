@@ -13,6 +13,11 @@ export default function ResultsView({ refreshVersion, onReview }) {
   const filtered = useMemo(() => annotations.filter((item) => (
     filter === 'all' || effectiveLabel(item) === filter
   )), [annotations, filter]);
+  const outcomeCounts = useMemo(() => ({
+    safe: annotations.filter((item) => effectiveLabel(item) === 'safe').length,
+    unsafe: annotations.filter((item) => effectiveLabel(item) === 'unsafe').length,
+    humanReview: annotations.filter((item) => item.adjudication?.decision_type === 'human_review').length,
+  }), [annotations]);
   const selected = annotations.find((item) => item.prompt_id === selectedId);
 
   useEffect(() => {
@@ -60,10 +65,13 @@ export default function ResultsView({ refreshVersion, onReview }) {
         </div>
         {agreement && (
           <div className="metrics-grid agreement-summary">
-            <div><span>Fleiss kappa</span><strong>{agreement.fleiss_kappa ?? 'N/A'}</strong></div>
-            <div><span>Observed agreement</span><strong>{formatPercent(agreement.observed_agreement)}</strong></div>
-            <div><span>Unanimous</span><strong>{formatPercent(agreement.unanimous_rate)}</strong></div>
-            <div><span>Vote coverage</span><strong>{formatPercent(agreement.coverage_rate)}</strong></div>
+            <div><span>Fleiss kappa</span><strong>{agreement.fleiss_kappa ?? 'N/A'}</strong><small>3-model chance-corrected</small></div>
+            <div><span>Pairwise agreement</span><strong>{formatPercent(agreement.observed_agreement)}</strong><small>Average model-pair agreement</small></div>
+            <div><span>All 3 matched</span><strong>{formatPercent(agreement.unanimous_rate)}</strong><small>Complete panels only</small></div>
+            <div><span>Complete vote panels</span><strong>{formatRatio(agreement.complete_items, annotations.length)}</strong><small>All 3 votes succeeded</small></div>
+            <div><span>Final safe rate</span><strong>{formatRatio(outcomeCounts.safe, annotations.length)}</strong></div>
+            <div><span>Final unsafe rate</span><strong>{formatRatio(outcomeCounts.unsafe, annotations.length)}</strong></div>
+            <div><span>Human-review rate</span><strong>{formatRatio(outcomeCounts.humanReview, annotations.length)}</strong></div>
           </div>
         )}
         <div className="filter-row">
@@ -118,4 +126,8 @@ function download(blob, filename) {
 
 function formatPercent(value) {
   return value == null ? 'N/A' : `${Math.round(value * 100)}%`;
+}
+
+function formatRatio(count, total) {
+  return total ? `${count} / ${total} (${formatPercent(count / total)})` : '0 / 0';
 }
