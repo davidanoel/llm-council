@@ -147,6 +147,17 @@ class AgreementMetrics(BaseModel):
     coverage_rate: float
 
 
+class ExportAnalysis(BaseModel):
+    """Agreement and final-label counts reconstructed from an export CSV."""
+
+    agreement: AgreementMetrics
+    total_items: int
+    safe_items: int
+    unsafe_items: int
+    unresolved_items: int
+    human_review_items: int
+
+
 def utc_now() -> str:
     """Return an ISO UTC timestamp."""
 

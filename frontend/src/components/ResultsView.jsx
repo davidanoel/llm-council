@@ -8,6 +8,7 @@ export default function ResultsView({ refreshVersion, onReview }) {
   const [filter, setFilter] = useState('all');
   const [selectedId, setSelectedId] = useState(null);
   const [agreement, setAgreement] = useState(null);
+  const [importedAnalysis, setImportedAnalysis] = useState(null);
   const [status, setStatus] = useState('');
 
   const filtered = useMemo(() => annotations.filter((item) => (
@@ -19,6 +20,13 @@ export default function ResultsView({ refreshVersion, onReview }) {
     humanReview: annotations.filter((item) => item.adjudication?.decision_type === 'human_review').length,
   }), [annotations]);
   const selected = annotations.find((item) => item.prompt_id === selectedId);
+  const displayedAgreement = importedAnalysis?.agreement || agreement;
+  const displayedTotal = importedAnalysis?.total_items ?? annotations.length;
+  const displayedCounts = importedAnalysis ? {
+    safe: importedAnalysis.safe_items,
+    unsafe: importedAnalysis.unsafe_items,
+    humanReview: importedAnalysis.human_review_items,
+  } : outcomeCounts;
 
   useEffect(() => {
     let active = true;
@@ -52,6 +60,20 @@ export default function ResultsView({ refreshVersion, onReview }) {
     }
   }
 
+  async function analyzeCsv(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const analysis = await api.analyzeExportCsv(await file.text());
+      setImportedAnalysis({ ...analysis, fileName: file.name });
+      setStatus('');
+    } catch (err) {
+      setStatus(err.message);
+    } finally {
+      event.target.value = '';
+    }
+  }
+
   return (
     <section className="view-stack">
       <section className="panel results-panel">
@@ -61,17 +83,21 @@ export default function ResultsView({ refreshVersion, onReview }) {
             {annotations.some((item) => effectiveLabel(item) === 'needs_human_review') && <button type="button" onClick={onReview}>Review unresolved</button>}
             <button type="button" className="secondary" onClick={downloadJson}>Export JSON</button>
             <button type="button" className="secondary" onClick={downloadCsv}>Export CSV</button>
+            <label className="upload-button">Analyze CSV<input type="file" accept=".csv,text/csv" onChange={analyzeCsv} /></label>
           </div>
         </div>
-        {agreement && (
+        {importedAnalysis && (
+          <div className="metric-source">Metrics from <strong>{importedAnalysis.fileName}</strong><button type="button" className="filter" onClick={() => setImportedAnalysis(null)}>Use current data</button></div>
+        )}
+        {displayedAgreement && (
           <div className="metrics-grid agreement-summary">
-            <div><span>Fleiss kappa</span><strong>{agreement.fleiss_kappa ?? 'N/A'}</strong><small>3-model chance-corrected</small></div>
-            <div><span>Pairwise agreement</span><strong>{formatPercent(agreement.observed_agreement)}</strong><small>Average model-pair agreement</small></div>
-            <div><span>All 3 matched</span><strong>{formatPercent(agreement.unanimous_rate)}</strong><small>Complete panels only</small></div>
-            <div><span>Complete vote panels</span><strong>{formatRatio(agreement.complete_items, annotations.length)}</strong><small>All 3 votes succeeded</small></div>
-            <div><span>Final safe rate</span><strong>{formatRatio(outcomeCounts.safe, annotations.length)}</strong></div>
-            <div><span>Final unsafe rate</span><strong>{formatRatio(outcomeCounts.unsafe, annotations.length)}</strong></div>
-            <div><span>Human-review rate</span><strong>{formatRatio(outcomeCounts.humanReview, annotations.length)}</strong></div>
+            <div><span>Fleiss kappa</span><strong>{displayedAgreement.fleiss_kappa ?? 'N/A'}</strong><small>3-model chance-corrected</small></div>
+            <div><span>Pairwise agreement</span><strong>{formatPercent(displayedAgreement.observed_agreement)}</strong><small>Average model-pair agreement</small></div>
+            <div><span>All 3 matched</span><strong>{formatPercent(displayedAgreement.unanimous_rate)}</strong><small>Complete panels only</small></div>
+            <div><span>Complete vote panels</span><strong>{formatRatio(displayedAgreement.complete_items, displayedTotal)}</strong><small>All 3 votes succeeded</small></div>
+            <div><span>Final safe rate</span><strong>{formatRatio(displayedCounts.safe, displayedTotal)}</strong></div>
+            <div><span>Final unsafe rate</span><strong>{formatRatio(displayedCounts.unsafe, displayedTotal)}</strong></div>
+            <div><span>Human-review rate</span><strong>{formatRatio(displayedCounts.humanReview, displayedTotal)}</strong></div>
           </div>
         )}
         <div className="filter-row">

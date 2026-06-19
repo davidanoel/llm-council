@@ -60,6 +60,14 @@ export const api = {
     return request('/api/agreement');
   },
 
+  analyzeExportCsv(csvText) {
+    return request('/api/agreement/csv', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/csv' },
+      body: csvText,
+    });
+  },
+
   reviewQueue() {
     return request('/api/review-queue');
   },

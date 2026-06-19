@@ -52,6 +52,8 @@ button {
 button:hover { background: #193f5d; }
 button:disabled { opacity: .45; cursor: default; }
 button.secondary { background: white; color: #24557a; }
+.upload-button { display: inline-flex; flex-direction: row; width: fit-content; padding: 9px 14px; border: 1px solid #24557a; border-radius: 4px; background: white; color: #24557a; font: inherit; cursor: pointer; }
+.upload-button input { display: none; }
 
 .view-tab {
   display: flex;
@@ -111,6 +113,7 @@ textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, C
 .summary-grid span,
 .metrics-grid span { color: #607080; font-size: 12px; text-transform: capitalize; }
 .metrics-grid small { color: #607080; font-size: 11px; }
+.metric-source { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: #607080; font-size: 13px; }
 .warning-text { grid-column: 1 / -1; color: #92400e; }
 
 .advanced-panel summary,

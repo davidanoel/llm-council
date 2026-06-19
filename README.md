@@ -98,6 +98,7 @@ Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
 - `POST /api/annotate/csv`
 - `GET /api/annotations`
 - `GET /api/agreement`
+- `POST /api/agreement/csv`
 - `GET /api/review-queue`
 - `POST /api/human-review`
 - `GET /api/export-labels`
@@ -105,6 +106,7 @@ Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
 
 Exports use the latest human label when present.
 JSON exports include the complete structured model vote list. CSV exports flatten the three votes into `vote_1_*`, `vote_2_*`, and `vote_3_*` columns for model name, label, confidence, unsafe category, rationale, and parse error.
+Use **Analyze CSV** in Results to recompute metrics from a previous labels export without storing or re-annotating it.
 
 ## Tests
 

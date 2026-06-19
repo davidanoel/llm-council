@@ -243,6 +243,30 @@ def test_csv_export_headers_human_override_prompt_and_metadata(tmp_path, monkeyp
     assert rows[0]["vote_1_confidence"]
     assert rows[0]["vote_1_rationale"]
 
+    analysis = client.post(
+        "/api/agreement/csv",
+        content=response.text,
+        headers={"Content-Type": "text/csv"},
+    )
+    assert analysis.status_code == 200
+    assert analysis.json()["total_items"] == 1
+    assert analysis.json()["unsafe_items"] == 1
+    assert analysis.json()["human_review_items"] == 1
+    assert analysis.json()["agreement"]["complete_items"] == 1
+
+
+def test_analyze_csv_rejects_non_export_csv(monkeypatch):
+    client = ApiClient(app)
+
+    response = client.post(
+        "/api/agreement/csv",
+        content="prompt,label\nhello,safe\n",
+        headers={"Content-Type": "text/csv"},
+    )
+
+    assert response.status_code == 400
+    assert "model vote columns" in response.text
+
 
 def test_batch_provider_failure_counts_completed_human_review_and_provider_failed(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))

@@ -15,7 +15,7 @@ from fastapi import Body, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import storage
-from .agreement import calculate_agreement
+from .agreement import analyze_export_csv, calculate_agreement
 from .council import run_council
 from .csv_utils import parse_csv_annotations
 from .model_provider import (
@@ -31,6 +31,7 @@ from .schemas import (
     BatchAnnotationRequest,
     BatchProgress,
     ExportedLabel,
+    ExportAnalysis,
     HumanReviewRequest,
     utc_now,
 )
@@ -185,6 +186,16 @@ async def agreement() -> AgreementMetrics:
     """Report agreement among complete AI annotation panels."""
 
     return calculate_agreement(storage.list_annotations())
+
+
+@app.post("/api/agreement/csv", response_model=ExportAnalysis)
+async def agreement_from_csv(csv_text: str = Body(..., media_type="text/csv")) -> ExportAnalysis:
+    """Recompute metrics from a previously exported labels CSV."""
+
+    try:
+        return analyze_export_csv(csv_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
 @app.get("/api/review-queue", response_model=List[AnnotationResult])
