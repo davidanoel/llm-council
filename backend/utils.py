@@ -7,7 +7,7 @@ import os
 import time
 
 import dotenv
-import requests
+import httpx
 from amexcerts import certificate_path
 
 
@@ -79,11 +79,11 @@ def get_a2a_jwt_token():
 
     if TOKEN_URL is None:
         raise ValueError("JWT_TOKEN_URL is not set. Please check your environment variables.")
-    response = requests.post(
-        TOKEN_URL,
-        headers=headers,
-        json=payload,
-        verify=root_ca_path,
-    )
+    with httpx.Client(timeout=60.0, verify=root_ca_path) as client:
+        response = client.post(
+            TOKEN_URL,
+            headers=headers,
+            json=payload,
+        )
     response.raise_for_status()
     return response.json()["authorization_token"]

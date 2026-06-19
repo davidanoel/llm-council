@@ -250,7 +250,8 @@ async def post_json(
     try:
         from .utils import root_ca_path
     except ImportError as exc:
-        raise RuntimeError("Internal CA dependencies are unavailable") from exc
+        missing_module = exc.name or str(exc)
+        raise RuntimeError(f"Internal CA dependency is unavailable: {missing_module}") from exc
 
     async with httpx.AsyncClient(timeout=60.0, verify=root_ca_path) as client:
         response = await client.post(
