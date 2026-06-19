@@ -52,6 +52,11 @@ def test_annotate_and_export_api(tmp_path, monkeypatch):
     assert exported.status_code == 200
     assert exported.json()[0]["prompt_id"] == "p1"
 
+    agreement = client.get("/api/agreement")
+    assert agreement.status_code == 200
+    assert agreement.json()["complete_items"] == 1
+    assert agreement.json()["coverage_rate"] == 1.0
+
 
 def test_human_review_api(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))

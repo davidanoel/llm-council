@@ -14,9 +14,9 @@ Three AI annotators classify each prompt independently. Their identities and out
 
 The backend then applies deterministic rules:
 
-- **Auto-safe:** all three vote safe, average confidence passes the safe threshold, and no serious or ambiguous policy signal is raised.
-- **Auto-unsafe:** at least two vote unsafe, average unsafe confidence passes the unsafe threshold, and the unsafe category agrees.
-- **Human review:** every other vote pattern, provider failure, ambiguity, or low-confidence result.
+- **Auto-safe:** at least two valid AI votes are safe.
+- **Auto-unsafe:** at least two valid AI votes are unsafe.
+- **Human review:** no valid majority exists because votes split, abstain, or fail.
 
 There is no AI judge. Unresolved cases go to a human reviewer rather than giving one annotating model additional authority.
 
@@ -47,7 +47,7 @@ The default internal annotators are:
 COUNCIL_MODELS=chatgpt-5.1,gemini-3.1-pro,claude-sonnet-4.5
 ```
 
-Internal ChatGPT and Gemini requests use `INTERNAL_MODEL_API_KEY` when set, otherwise `backend/utils.py` obtains an internal A2A JWT. Claude requests use the separate `ANTHROPIC_BEARER_TOKEN` as an `Authorization: Bearer` header. Internal requests trust the company CA bundle provided by `amexcerts`. Keep credentials in `.env`; never commit them.
+Internal ChatGPT and Gemini requests use `INTERNAL_MODEL_API_KEY` when set, otherwise `backend/utils.py` obtains and caches an internal A2A JWT. Claude uses `ANTHROPIC_BEARER_TOKEN` when set, otherwise it obtains and caches `gcloud auth print-access-token`. Internal requests trust the company CA bundle provided by `amexcerts`. Keep credentials in `.env`; never commit them.
 
 ## Run
 
@@ -69,7 +69,7 @@ cd frontend && npm run dev
 
 1. **Annotate:** upload and validate a CSV, then explicitly start annotation. Single-prompt and JSON input are under Advanced.
 2. **Review:** resolve uncertain prompts one at a time and save the human label.
-3. **Results:** filter completed annotations, inspect model votes, and export JSON or CSV.
+3. **Results:** view AI agreement, filter completed annotations, inspect votes, and export JSON or CSV.
 
 ## CSV Input
 
@@ -95,6 +95,7 @@ Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
 - `POST /api/annotate/csv/validate`
 - `POST /api/annotate/csv`
 - `GET /api/annotations`
+- `GET /api/agreement`
 - `GET /api/review-queue`
 - `POST /api/human-review`
 - `GET /api/export-labels`

@@ -50,22 +50,22 @@ def test_provider_failure_needs_human_review(monkeypatch):
     assert decision.decision_type == "human_review"
 
 
-def test_safe_requires_unanimous_votes():
+def test_two_safe_votes_auto_safe():
     decision = aggregate_votes("p", [
         vote("safe", model="m1"),
         vote("safe", model="m2"),
         vote("unsafe", category="phishing", model="m3"),
     ])
-    assert decision.decision_type == "human_review"
+    assert decision.decision_type == "auto_safe"
 
 
-def test_safe_requires_threshold():
+def test_majority_does_not_use_confidence_as_a_veto():
     decision = aggregate_votes("p", [
         vote("safe", 0.7, model="m1"),
         vote("safe", 0.8, model="m2"),
         vote("safe", 0.8, model="m3"),
     ])
-    assert decision.decision_type == "human_review"
+    assert decision.decision_type == "auto_safe"
 
 
 def test_two_unsafe_votes_auto_unsafe():
@@ -77,20 +77,52 @@ def test_two_unsafe_votes_auto_unsafe():
     assert decision.decision_type == "auto_unsafe"
 
 
-def test_unsafe_category_disagreement_needs_review():
+def test_unsafe_category_disagreement_keeps_binary_majority():
     decision = aggregate_votes("p", [
         vote("unsafe", 0.9, "phishing", "m1"),
         vote("unsafe", 0.9, "malware", "m2"),
         vote("safe", model="m3"),
     ])
+    assert decision.decision_type == "auto_unsafe"
+    assert decision.unsafe_category == "other"
+
+
+def test_two_safe_votes_win_when_third_model_abstains():
+    decision = aggregate_votes("p", [
+        vote("safe", model="m1"),
+        vote("safe", model="m2"),
+        vote("needs_human_review", model="m3", ambiguous_terms=["internal"]),
+    ])
+    assert decision.decision_type == "auto_safe"
+
+
+def test_split_votes_need_human_review():
+    decision = aggregate_votes("p", [
+        vote("safe", model="m1"),
+        vote("unsafe", category="phishing", model="m2"),
+        vote("needs_human_review", model="m3"),
+    ])
     assert decision.decision_type == "human_review"
 
 
-def test_policy_sensitive_safe_votes_need_review():
+def test_one_provider_failure_with_two_agreeing_votes_still_has_majority():
+    failed_vote = vote("needs_human_review", confidence=0.0, model="m3")
+    failed_vote.parse_error = "provider failed"
     decision = aggregate_votes("p", [
-        vote("safe", model="m1", ambiguous_terms=["internal"]),
+        vote("safe", model="m1"),
         vote("safe", model="m2"),
-        vote("safe", model="m3"),
+        failed_vote,
+    ])
+    assert decision.decision_type == "auto_safe"
+
+
+def test_one_provider_failure_with_split_votes_needs_human_review():
+    failed_vote = vote("needs_human_review", confidence=0.0, model="m3")
+    failed_vote.parse_error = "provider failed"
+    decision = aggregate_votes("p", [
+        vote("safe", model="m1"),
+        vote("unsafe", category="phishing", model="m2"),
+        failed_vote,
     ])
     assert decision.decision_type == "human_review"
 

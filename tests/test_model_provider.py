@@ -52,6 +52,42 @@ def test_parse_model_vote_json_invalid_fails_closed():
     assert vote.parse_error
 
 
+def test_parse_model_vote_json_normalizes_high_confidence():
+    raw = json.dumps(
+        {
+            "label": "safe",
+            "unsafe_category": "none",
+            "confidence": "high",
+            "rationale": "Defensive request.",
+            "policy_triggers": ["safe_context"],
+            "ambiguous_terms": [],
+        }
+    )
+
+    vote = parse_model_vote_json("p1", "chatgpt-5.1", raw)
+
+    assert vote.confidence == 0.85
+    assert vote.parse_error is None
+
+
+def test_parse_model_vote_json_unknown_confidence_fails_closed():
+    raw = json.dumps(
+        {
+            "label": "safe",
+            "unsafe_category": "none",
+            "confidence": "probably",
+            "rationale": "Defensive request.",
+            "policy_triggers": ["safe_context"],
+            "ambiguous_terms": [],
+        }
+    )
+
+    vote = parse_model_vote_json("p1", "chatgpt-5.1", raw)
+
+    assert vote.label == "needs_human_review"
+    assert vote.parse_error
+
+
 def test_mock_provider_kill_port_edge_case_is_safe():
     provider = MockModelProvider()
 
@@ -101,11 +137,21 @@ def test_internal_provider_uses_a2a_jwt_fallback(monkeypatch):
     assert len(calls) == 1
 
 
-def test_internal_provider_does_not_request_a2a_token_for_anthropic(monkeypatch):
+def test_internal_provider_caches_gcloud_token_for_anthropic(monkeypatch):
     monkeypatch.delenv("INTERNAL_MODEL_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BEARER_TOKEN", raising=False)
     provider = InternalModelProvider()
+    calls = []
 
-    assert provider._get_api_key("claude-sonnet-4.5") is None
+    def fake_gcloud_token():
+        calls.append(True)
+        return "gcloud-token"
+
+    monkeypatch.setattr("backend.model_provider.run_gcloud_access_token", fake_gcloud_token)
+
+    assert provider._get_api_key("claude-sonnet-4.5") == "gcloud-token"
+    assert provider._get_api_key("claude-sonnet-4.5") == "gcloud-token"
+    assert len(calls) == 1
 
 
 def test_internal_model_url_mapping(monkeypatch):
@@ -179,7 +225,7 @@ def test_anthropic_payload_uses_messages_shape():
     assert payload["system"] == "policy"
     assert payload["messages"][0]["role"] == "user"
     assert not any(message.get("role") == "system" for message in payload["messages"])
-    assert payload["max_tokens"] == 128
+    assert payload["max_tokens"] == 512
     assert payload["anthropic_version"] == "vertex-2023-10-16"
 
 
@@ -205,7 +251,7 @@ def test_known_models_route_to_provider_families():
 def test_anthropic_headers_use_dedicated_bearer_token(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_BEARER_TOKEN", "claude-token")
 
-    headers = build_internal_headers("claude-sonnet-4.5", "generic-token")
+    headers = build_internal_headers("claude-sonnet-4.5")
 
     assert headers == {
         "Content-Type": "application/json",
@@ -224,9 +270,12 @@ def test_non_anthropic_headers_use_internal_api_key(monkeypatch):
     }
 
 
-def test_anthropic_headers_do_not_fall_back_to_internal_api_key(monkeypatch):
+def test_anthropic_headers_use_explicit_runtime_token(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_BEARER_TOKEN", raising=False)
 
-    headers = build_internal_headers("claude-sonnet-4.5", "generic-token")
+    headers = build_internal_headers("claude-sonnet-4.5", "gcloud-token")
 
-    assert headers == {"Content-Type": "application/json"}
+    assert headers == {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer gcloud-token",
+    }

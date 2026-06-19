@@ -7,6 +7,7 @@ export default function ResultsView({ refreshVersion, onReview }) {
   const [annotations, setAnnotations] = useState([]);
   const [filter, setFilter] = useState('all');
   const [selectedId, setSelectedId] = useState(null);
+  const [agreement, setAgreement] = useState(null);
   const [status, setStatus] = useState('');
 
   const filtered = useMemo(() => annotations.filter((item) => (
@@ -16,10 +17,11 @@ export default function ResultsView({ refreshVersion, onReview }) {
 
   useEffect(() => {
     let active = true;
-    api.listAnnotations()
-      .then((items) => {
+    Promise.all([api.listAnnotations(), api.agreement()])
+      .then(([items, metrics]) => {
         if (active) {
           setAnnotations(items);
+          setAgreement(metrics);
           setSelectedId((current) => current || items[0]?.prompt_id || null);
         }
       })
@@ -56,6 +58,14 @@ export default function ResultsView({ refreshVersion, onReview }) {
             <button type="button" className="secondary" onClick={downloadCsv}>Export CSV</button>
           </div>
         </div>
+        {agreement && (
+          <div className="metrics-grid agreement-summary">
+            <div><span>Fleiss kappa</span><strong>{agreement.fleiss_kappa ?? 'N/A'}</strong></div>
+            <div><span>Observed agreement</span><strong>{formatPercent(agreement.observed_agreement)}</strong></div>
+            <div><span>Unanimous</span><strong>{formatPercent(agreement.unanimous_rate)}</strong></div>
+            <div><span>Vote coverage</span><strong>{formatPercent(agreement.coverage_rate)}</strong></div>
+          </div>
+        )}
         <div className="filter-row">
           {['all', 'safe', 'unsafe', 'needs_human_review'].map((value) => (
             <button key={value} type="button" className={filter === value ? 'filter active' : 'filter'} onClick={() => setFilter(value)}>{value === 'all' ? 'All' : displayLabel(value)}</button>
@@ -104,4 +114,8 @@ function download(blob, filename) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function formatPercent(value) {
+  return value == null ? 'N/A' : `${Math.round(value * 100)}%`;
 }

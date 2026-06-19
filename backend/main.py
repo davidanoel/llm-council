@@ -15,17 +15,18 @@ from fastapi import Body, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import storage
+from .agreement import calculate_agreement
 from .council import run_council
 from .csv_utils import parse_csv_annotations
 from .model_provider import (
+    close_http_client,
     external_calls_disabled,
     get_model_provider_name,
-    initialize_http_client,
-    close_http_client,
 )
 from .schemas import (
     AnnotationRequest,
     AnnotationResult,
+    AgreementMetrics,
     BatchAnnotationResponse,
     BatchAnnotationRequest,
     BatchProgress,
@@ -37,12 +38,13 @@ from .schemas import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage HTTP client lifecycle for connection pooling."""
-    # Startup
-    await initialize_http_client()
-    yield
-    # Shutdown
-    await close_http_client()
+    """Close the lazily created shared HTTP client at shutdown."""
+
+    del app
+    try:
+        yield
+    finally:
+        await close_http_client()
 
 
 app = FastAPI(title="Cybersecurity Prompt Labelling API", lifespan=lifespan)
@@ -170,6 +172,13 @@ async def list_annotations() -> List[AnnotationResult]:
     """List stored annotations."""
 
     return storage.list_annotations()
+
+
+@app.get("/api/agreement", response_model=AgreementMetrics)
+async def agreement() -> AgreementMetrics:
+    """Report agreement among complete AI annotation panels."""
+
+    return calculate_agreement(storage.list_annotations())
 
 
 @app.get("/api/review-queue", response_model=List[AnnotationResult])

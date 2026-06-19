@@ -7,12 +7,7 @@ from collections import Counter
 from typing import Any, Dict, List, Optional
 
 from .model_provider import get_council_models, get_provider
-from .policy import AMBIGUITY_TERMS, HIGH_SEVERITY_UNSAFE_CATEGORIES
 from .schemas import CouncilDecision, ModelVote
-
-
-AUTO_SAFE_THRESHOLD = 0.8
-AUTO_UNSAFE_THRESHOLD = 0.75
 
 
 async def collect_votes(
@@ -31,64 +26,41 @@ async def collect_votes(
 
 
 def aggregate_votes(prompt_id: str, votes: List[ModelVote]) -> CouncilDecision:
-    """Apply asymmetric deterministic rules to independent model votes."""
+    """Apply a simple two-of-three majority to valid model votes."""
 
     if len(votes) != 3:
         return human_review(prompt_id, "Expected three independent model votes.", votes)
 
-    # Filter out failed votes; only return human_review if all votes failed or too few succeeded
     successful_votes = [vote for vote in votes if not vote.parse_error]
-    if len(successful_votes) < 2:
-        return human_review(prompt_id, "Insufficient successful provider calls for decision.", votes)
-
     safe_votes = [vote for vote in successful_votes if vote.label == "safe"]
     unsafe_votes = [vote for vote in successful_votes if vote.label == "unsafe"]
-    serious_unsafe_signal = any(
-        vote.unsafe_category in HIGH_SEVERITY_UNSAFE_CATEGORIES
-        for vote in successful_votes
-    )
-    policy_sensitive_signal = any(
-        ("ambiguous_authorization" in vote.policy_triggers or any(
-            term in AMBIGUITY_TERMS for term in vote.ambiguous_terms
-        ))
-        for vote in successful_votes
-    )
 
-    if (
-        len(safe_votes) >= 2 and len(unsafe_votes) == 0
-        and average_confidence(safe_votes) >= AUTO_SAFE_THRESHOLD
-        and not serious_unsafe_signal
-        and not policy_sensitive_signal
-    ):
+    if len(safe_votes) >= 2:
         return CouncilDecision(
             prompt_id=prompt_id,
             final_label="safe",
             unsafe_category="none",
             confidence=round(average_confidence(safe_votes), 2),
-            rationale=f"{len(safe_votes)} independent annotators voted safe with sufficient confidence.",
+            rationale=f"{len(safe_votes)} of 3 AI annotators voted safe.",
             human_review_reason=None,
             decision_type="auto_safe",
         )
 
-    if (
-        len(unsafe_votes) >= 2
-        and average_confidence(unsafe_votes) >= AUTO_UNSAFE_THRESHOLD
-        and not unsafe_category_is_ambiguous(unsafe_votes)
-    ):
-        category = most_common_category(unsafe_votes)
+    if len(unsafe_votes) >= 2:
+        category = majority_unsafe_category(unsafe_votes)
         return CouncilDecision(
             prompt_id=prompt_id,
             final_label="unsafe",
             unsafe_category=category,
             confidence=round(average_confidence(unsafe_votes), 2),
-            rationale=f"At least two independent annotators voted unsafe with sufficient confidence ({category}).",
+            rationale=f"{len(unsafe_votes)} of 3 AI annotators voted unsafe.",
             human_review_reason=None,
             decision_type="auto_unsafe",
         )
 
     return human_review(
         prompt_id,
-        "Independent votes did not meet the auto-safe or auto-unsafe rules.",
+        "The AI annotators did not produce a valid safe or unsafe majority.",
         votes,
     )
 
@@ -126,14 +98,17 @@ def most_common_category(votes: List[ModelVote]) -> str:
     return Counter(categories).most_common(1)[0][0] if categories else "none"
 
 
+def majority_unsafe_category(votes: List[ModelVote]) -> str:
+    """Return a majority unsafe category, or other when categories split."""
+
+    categories = [vote.unsafe_category for vote in votes if vote.unsafe_category != "none"]
+    if not categories:
+        return "other"
+    category, count = Counter(categories).most_common(1)[0]
+    return category if count >= 2 or len(categories) == 1 else "other"
+
+
 def average_confidence(votes: List[ModelVote]) -> float:
     """Return average self-reported confidence for votes."""
 
     return sum(vote.confidence for vote in votes) / len(votes) if votes else 0.0
-
-
-def unsafe_category_is_ambiguous(unsafe_votes: List[ModelVote]) -> bool:
-    """Return whether unsafe category signals need human adjudication."""
-
-    categories = [vote.unsafe_category for vote in unsafe_votes if vote.unsafe_category != "none"]
-    return not categories or "other" in categories or len(set(categories)) > 1

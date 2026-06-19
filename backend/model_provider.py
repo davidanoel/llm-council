@@ -4,8 +4,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
+import time
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
-from typing import Union
 
 import httpx
 from dotenv import load_dotenv
@@ -19,6 +21,7 @@ load_dotenv()
 
 # Module-level persistent HTTP client for connection pooling and reuse
 _http_client: Optional[httpx.AsyncClient] = None
+TOKEN_CACHE_SECONDS = 3000
 
 DEFAULT_COUNCIL_MODELS = ["chatgpt-5.1", "gemini-3.1-pro", "claude-sonnet-4.5"]
 LABELS = ["safe", "unsafe", "needs_human_review"]
@@ -195,7 +198,7 @@ def build_anthropic_payload(
     return {
         "anthropic_version": "vertex-2023-10-16",
         "system": system_prompt,
-        "max_tokens": 128,
+        "max_tokens": 512,
         "messages": [
             {
                 "role": "user",
@@ -223,7 +226,11 @@ def get_model_bearer_token(model_name: str, internal_api_key: Optional[str] = No
     """Return the bearer token configured for a model family."""
 
     if get_model_family(model_name) == "anthropic":
-        return os.getenv("ANTHROPIC_BEARER_TOKEN", "").strip() or None
+        return (
+            internal_api_key.strip()
+            if internal_api_key and internal_api_key.strip()
+            else os.getenv("ANTHROPIC_BEARER_TOKEN", "").strip() or None
+        )
     return internal_api_key.strip() if internal_api_key and internal_api_key.strip() else None
 
 
@@ -253,7 +260,7 @@ async def initialize_http_client() -> None:
     _http_client = httpx.AsyncClient(
         timeout=60.0,
         verify=root_ca_path,
-        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+        limits=httpx.Limits(max_connections=20, max_keepalive_connections=20),
     )
 
 
@@ -313,7 +320,6 @@ async def call_model(model_name: str, system_prompt: str, user_prompt: str, outp
         extractor = extract_generic_text
 
     response_json = await post_json(get_model_url(model_name), payload, model_name, api_key)
-    print(f"Model response JSON for {model_name}: {response_json}")
     return extractor(response_json)
 
 
@@ -406,6 +412,27 @@ def extract_generic_text(data: Dict[str, Any]) -> str:
     raise ModelResponseError("Could not extract generic response text")
 
 
+def normalize_confidence(value: Any) -> Any:
+    """Normalize common categorical confidence values from model output."""
+
+    if not isinstance(value, str):
+        return value
+
+    normalized = value.strip().lower()
+    categorical_values = {
+        "low": 0.25,
+        "medium": 0.5,
+        "high": 0.85,
+    }
+    if normalized in categorical_values:
+        return categorical_values[normalized]
+
+    try:
+        return float(normalized)
+    except ValueError as exc:
+        raise ValueError(f"Unsupported confidence value: {value!r}") from exc
+
+
 def parse_model_vote_json(prompt_id: str, model_name: str, raw_text: str) -> ModelVote:
     """Parse a strict JSON model vote, failing closed on malformed output."""
 
@@ -413,60 +440,15 @@ def parse_model_vote_json(prompt_id: str, model_name: str, raw_text: str) -> Mod
         data = json.loads(raw_text)
         data.setdefault("prompt_id", prompt_id)
         data.setdefault("model_name", model_name)
-        
-        # Normalize text confidence levels to numeric values
-        if "confidence" in data and isinstance(data["confidence"], str):
+        if "confidence" in data:
             data["confidence"] = normalize_confidence(data["confidence"])
-        
+
         return ModelVote(**data)
     except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
         return fail_closed_vote(
             prompt_id,
             model_name,
             f"Provider returned invalid annotation JSON: {exc}",
-        def normalize_confidence(value: Union[str, float]) -> float:
-            """Convert text confidence levels to numeric [0, 1] range."""
-    
-            if isinstance(value, (int, float)):
-                # Clamp to valid range
-                return max(0.0, min(1.0, float(value)))
-    
-            if not isinstance(value, str):
-                return 0.0
-    
-            text = value.strip().lower()
-    
-            # Direct text-to-float mappings
-            text_to_confidence = {
-                "very_low": 0.1,
-                "very low": 0.1,
-                "verylow": 0.1,
-                "low": 0.25,
-                "medium_low": 0.4,
-                "medium low": 0.4,
-                "mediumlow": 0.4,
-                "medium": 0.5,
-                "medium_high": 0.65,
-                "medium high": 0.65,
-                "mediumhigh": 0.65,
-                "high": 0.85,
-                "very_high": 0.95,
-                "very high": 0.95,
-                "veryhigh": 0.95,
-                "certain": 0.95,
-                "uncertain": 0.5,
-            }
-    
-            if text in text_to_confidence:
-                return text_to_confidence[text]
-    
-            # Try to parse as float
-            try:
-                return max(0.0, min(1.0, float(text)))
-            except ValueError:
-                # Default to 0.5 (neutral) if unparseable
-                return 0.5
-
         )
 
 
@@ -559,23 +541,42 @@ class InternalModelProvider(BaseModelProvider):
     """Internal model API adapter."""
 
     def __init__(self) -> None:
-        self.api_key = os.getenv("INTERNAL_MODEL_API_KEY")
-        self._a2a_token_attempted = False
+        self._a2a_token: Optional[str] = None
+        self._a2a_token_expires_at = 0.0
+        self._anthropic_token: Optional[str] = None
+        self._anthropic_token_expires_at = 0.0
 
     def _get_api_key(self, model_name: str) -> Optional[str]:
-        """Resolve static or A2A auth for non-Anthropic internal models."""
+        """Return a cached bearer token for the model family."""
 
-        if get_model_family(model_name) == "anthropic" or self.api_key:
-            return self.api_key
-        if not self._a2a_token_attempted:
-            self._a2a_token_attempted = True
-            try:
-                from .utils import get_a2a_jwt_token
+        if get_model_family(model_name) == "anthropic":
+            static_token = os.getenv("ANTHROPIC_BEARER_TOKEN", "").strip()
+            if static_token:
+                return static_token
+            return self._get_gcloud_token()
 
-                self.api_key = get_a2a_jwt_token()
-            except Exception:
-                self.api_key = None
-        return self.api_key
+        static_token = os.getenv("INTERNAL_MODEL_API_KEY", "").strip()
+        if static_token:
+            return static_token
+
+        now = time.monotonic()
+        if self._a2a_token and now < self._a2a_token_expires_at:
+            return self._a2a_token
+        from .utils import get_a2a_jwt_token
+
+        self._a2a_token = get_a2a_jwt_token()
+        self._a2a_token_expires_at = now + TOKEN_CACHE_SECONDS
+        return self._a2a_token
+
+    def _get_gcloud_token(self) -> str:
+        """Return a cached Google access token for Anthropic calls."""
+
+        now = time.monotonic()
+        if self._anthropic_token and now < self._anthropic_token_expires_at:
+            return self._anthropic_token
+        self._anthropic_token = run_gcloud_access_token()
+        self._anthropic_token_expires_at = now + TOKEN_CACHE_SECONDS
+        return self._anthropic_token
 
     def _ready(self) -> bool:
         return not external_calls_disabled()
@@ -594,14 +595,35 @@ class InternalModelProvider(BaseModelProvider):
             return fail_closed_vote(prompt_id, model_name, f"Internal provider call failed: {exc}")
 
 
+def run_gcloud_access_token() -> str:
+    """Generate a Google access token without invoking a shell."""
+
+    result = subprocess.run(
+        ["gcloud", "auth", "print-access-token"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    token = result.stdout.strip()
+    if not token:
+        raise RuntimeError("gcloud returned an empty access token")
+    return token
+
+
+@lru_cache(maxsize=2)
+def _provider_for_name(provider_name: str) -> BaseModelProvider:
+    """Create one provider instance per configured provider type."""
+
+    if provider_name == "internal":
+        return InternalModelProvider()
+    return MockModelProvider()
+
 
 def get_provider() -> BaseModelProvider:
     """Create the configured model provider."""
 
-    provider_name = get_model_provider_name()
-    if provider_name == "internal":
-        return InternalModelProvider()
-    return MockModelProvider()
+    return _provider_for_name(get_model_provider_name())
 
 
 def classify_unsafe_category(text: str) -> tuple[str, List[str]]:

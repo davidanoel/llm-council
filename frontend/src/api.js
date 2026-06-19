@@ -56,6 +56,10 @@ export const api = {
     return request('/api/annotations');
   },
 
+  agreement() {
+    return request('/api/agreement');
+  },
+
   reviewQueue() {
     return request('/api/review-queue');
   },

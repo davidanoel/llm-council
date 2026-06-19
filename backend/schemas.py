@@ -132,6 +132,17 @@ class ExportedLabel(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class AgreementMetrics(BaseModel):
+    """Dataset-level agreement among successful AI annotator panels."""
+
+    fleiss_kappa: Optional[float]
+    observed_agreement: Optional[float]
+    unanimous_rate: Optional[float]
+    complete_items: int
+    excluded_items: int
+    coverage_rate: float
+
+
 def utc_now() -> str:
     """Return an ISO UTC timestamp."""
 
