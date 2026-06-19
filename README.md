@@ -47,7 +47,7 @@ The default internal annotators are:
 COUNCIL_MODELS=chatgpt-5.1,gemini-3.1-pro,claude-sonnet-4.5
 ```
 
-Internal ChatGPT and Gemini requests use `INTERNAL_MODEL_API_KEY` when set. Claude requests use the separate `ANTHROPIC_BEARER_TOKEN` as an `Authorization: Bearer` header. Keep both values in `.env`; never commit tokens.
+Internal ChatGPT and Gemini requests use `INTERNAL_MODEL_API_KEY` when set, otherwise `backend/utils.py` obtains an internal A2A JWT. Claude requests use the separate `ANTHROPIC_BEARER_TOKEN` as an `Authorization: Bearer` header. Internal requests trust the company CA bundle provided by `amexcerts`. Keep credentials in `.env`; never commit them.
 
 ## Run
 

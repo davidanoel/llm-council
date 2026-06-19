@@ -247,7 +247,12 @@ async def post_json(
 ) -> Dict[str, Any]:
     """POST JSON to an internal model endpoint."""
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    try:
+        from .utils import root_ca_path
+    except ImportError as exc:
+        raise RuntimeError("Internal CA dependencies are unavailable") from exc
+
+    async with httpx.AsyncClient(timeout=60.0, verify=root_ca_path) as client:
         response = await client.post(
             url,
             headers=build_internal_headers(model_name, api_key),
@@ -476,6 +481,19 @@ class InternalModelProvider(BaseModelProvider):
 
     def __init__(self) -> None:
         self.api_key = os.getenv("INTERNAL_MODEL_API_KEY")
+        self._a2a_token_attempted = False
+
+    def _get_api_key(self, model_name: str) -> Optional[str]:
+        """Resolve static or A2A auth for non-Anthropic internal models."""
+
+        if get_model_family(model_name) == "anthropic" or self.api_key:
+            return self.api_key
+        if not self._a2a_token_attempted:
+            self._a2a_token_attempted = True
+            from .utils import get_a2a_jwt_token
+
+            self.api_key = get_a2a_jwt_token()
+        return self.api_key
 
     def _ready(self) -> bool:
         return not external_calls_disabled()
@@ -487,7 +505,8 @@ class InternalModelProvider(BaseModelProvider):
         del metadata
         try:
             user_prompt = build_annotation_prompt(prompt_text)
-            raw_text = await call_model(model_name, CYBERSECURITY_POLICY, user_prompt, "ModelVote", self.api_key)
+            api_key = self._get_api_key(model_name)
+            raw_text = await call_model(model_name, CYBERSECURITY_POLICY, user_prompt, "ModelVote", api_key)
             return parse_model_vote_json(prompt_id, model_name, raw_text)
         except Exception as exc:
             return fail_closed_vote(prompt_id, model_name, f"Internal provider call failed: {exc}")

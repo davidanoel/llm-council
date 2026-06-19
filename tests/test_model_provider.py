@@ -1,5 +1,7 @@
 import asyncio
 import json
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -77,6 +79,33 @@ def test_internal_provider_missing_config_fails_closed(monkeypatch):
 
     assert vote.label == "needs_human_review"
     assert vote.parse_error
+
+
+def test_internal_provider_uses_a2a_jwt_fallback(monkeypatch):
+    calls = []
+
+    def fake_get_a2a_jwt_token():
+        calls.append(True)
+        return "a2a-token"
+
+    monkeypatch.delenv("INTERNAL_MODEL_API_KEY", raising=False)
+    monkeypatch.setitem(
+        sys.modules,
+        "backend.utils",
+        SimpleNamespace(get_a2a_jwt_token=fake_get_a2a_jwt_token),
+    )
+    provider = InternalModelProvider()
+
+    assert provider._get_api_key("gemini-3.1-pro") == "a2a-token"
+    assert provider._get_api_key("chatgpt-5.1") == "a2a-token"
+    assert len(calls) == 1
+
+
+def test_internal_provider_does_not_request_a2a_token_for_anthropic(monkeypatch):
+    monkeypatch.delenv("INTERNAL_MODEL_API_KEY", raising=False)
+    provider = InternalModelProvider()
+
+    assert provider._get_api_key("claude-sonnet-4.5") is None
 
 
 def test_internal_model_url_mapping(monkeypatch):
