@@ -7,6 +7,7 @@ Cyber Annotation Council labels cybersecurity prompts as:
 - `needs_human_review`
 
 It is a local FastAPI and React/Vite application for batch annotation, human review, and label export.
+Annotations are stored in the local SQLite file `data/annotations.db`.
 
 ## Decision Model
 

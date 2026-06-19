@@ -32,7 +32,7 @@ class ApiClient:
 
 
 def test_annotate_and_export_api(tmp_path, monkeypatch):
-    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
     monkeypatch.setenv("MODEL_PROVIDER", "mock")
     monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
     client = ApiClient(app)
@@ -60,7 +60,7 @@ def test_annotate_and_export_api(tmp_path, monkeypatch):
 
 
 def test_human_review_api(tmp_path, monkeypatch):
-    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
     monkeypatch.setenv("MODEL_PROVIDER", "mock")
     monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
     client = ApiClient(app)
@@ -79,7 +79,7 @@ def test_human_review_api(tmp_path, monkeypatch):
 
 
 def test_human_review_must_resolve_to_safe_or_unsafe(tmp_path, monkeypatch):
-    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
     client = ApiClient(app)
 
     response = client.post(
@@ -91,7 +91,7 @@ def test_human_review_must_resolve_to_safe_or_unsafe(tmp_path, monkeypatch):
 
 
 def test_batch_csv_annotation_with_mock_provider(tmp_path, monkeypatch):
-    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
     monkeypatch.setenv("MODEL_PROVIDER", "mock")
     monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
     client = ApiClient(app)
@@ -115,7 +115,7 @@ def test_batch_csv_annotation_with_mock_provider(tmp_path, monkeypatch):
 
 
 def test_response_annotation_is_stored_and_targets_response(tmp_path, monkeypatch):
-    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
     monkeypatch.setenv("MODEL_PROVIDER", "mock")
     monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
     client = ApiClient(app)
@@ -138,7 +138,7 @@ def test_response_annotation_is_stored_and_targets_response(tmp_path, monkeypatc
 
 
 def test_csv_validation_reports_rows_without_annotating(tmp_path, monkeypatch):
-    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
     client = ApiClient(app)
 
     response = client.post(
@@ -153,7 +153,7 @@ def test_csv_validation_reports_rows_without_annotating(tmp_path, monkeypatch):
 
 
 def test_batch_endpoint_returns_progress(tmp_path, monkeypatch):
-    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
     monkeypatch.setenv("MODEL_PROVIDER", "mock")
     monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
     client = ApiClient(app)
@@ -183,7 +183,7 @@ def test_batch_endpoint_returns_progress(tmp_path, monkeypatch):
 
 
 def test_csv_export_headers_human_override_prompt_and_metadata(tmp_path, monkeypatch):
-    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
     monkeypatch.setenv("MODEL_PROVIDER", "mock")
     monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
     client = ApiClient(app)
@@ -269,7 +269,7 @@ def test_analyze_csv_rejects_non_export_csv(monkeypatch):
 
 
 def test_batch_provider_failure_counts_completed_human_review_and_provider_failed(tmp_path, monkeypatch):
-    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
     monkeypatch.setenv("MODEL_PROVIDER", "internal")
     monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
     client = ApiClient(app)
@@ -307,7 +307,7 @@ def test_batch_app_exception_counts_failed(monkeypatch):
 
 
 def test_batch_ambiguous_prompt_counts_human_review_not_provider_failed(tmp_path, monkeypatch):
-    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
     monkeypatch.setenv("MODEL_PROVIDER", "mock")
     monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
     client = ApiClient(app)

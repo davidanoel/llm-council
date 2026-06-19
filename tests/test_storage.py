@@ -3,7 +3,7 @@ from backend.schemas import AnnotationResult, CouncilDecision, HumanReviewReques
 
 
 def test_save_load_annotation_and_human_override(tmp_path, monkeypatch):
-    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
     annotation = AnnotationResult(
         prompt_id="p1",
         prompt_text="Explain patching.",
@@ -37,7 +37,7 @@ def test_save_load_annotation_and_human_override(tmp_path, monkeypatch):
 
 
 def test_review_queue(tmp_path, monkeypatch):
-    monkeypatch.setattr(storage, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
     annotation = AnnotationResult(
         prompt_id="p1",
         prompt_text="Run nmap internally.",
