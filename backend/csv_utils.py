@@ -15,17 +15,46 @@ def parse_csv_annotations(csv_text: str) -> List[AnnotationRequest]:
     """Parse CSV rows into annotation requests."""
 
     reader = csv.DictReader(io.StringIO(csv_text))
-    if not reader.fieldnames or "prompt" not in reader.fieldnames:
-        raise ValueError("CSV must include a required 'prompt' column.")
+    if not reader.fieldnames:
+        raise ValueError("CSV must include a required prompt column.")
+
+    fieldnames = {name.strip().lower(): name for name in reader.fieldnames}
+    prompt_column = next(
+        (
+            fieldnames[name]
+            for name in ("prompt", "dialogue_history", "text")
+            if name in fieldnames
+        ),
+        None,
+    )
+    if not prompt_column:
+        raise ValueError(
+            "CSV must include a required 'prompt', 'dialogue_history', or 'text' column."
+        )
+
+    response_column = next(
+        (
+            fieldnames[name]
+            for name in ("response", "model_output")
+            if name in fieldnames
+        ),
+        None,
+    )
 
     requests = []
     for index, row in enumerate(reader, start=1):
-        prompt = (row.get("prompt") or "").strip()
+        prompt = (row.get(prompt_column) or "").strip()
         if not prompt:
             continue
 
-        response = (row.get("response") or "").strip() or None
-        prompt_id = (row.get("prompt_id") or "").strip() or deterministic_prompt_id(prompt, response)
+        response = (
+            (row.get(response_column) or "").strip() or None
+            if response_column
+            else None
+        )
+        prompt_id = (row.get("prompt_id") or "").strip() or deterministic_prompt_id(
+            prompt, response
+        )
         metadata = parse_metadata(row.get("metadata"))
         requests.append(
             AnnotationRequest(

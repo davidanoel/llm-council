@@ -213,7 +213,7 @@ def test_csv_export_headers_human_override_prompt_and_metadata(tmp_path, monkeyp
     assert response.headers["content-type"].startswith("text/csv")
     rows = list(csv.DictReader(StringIO(response.text)))
     assert rows
-    assert list(rows[0].keys())[:8] == [
+    assert list(rows[0].keys())[:10] == [
         "prompt_id",
         "prompt",
         "response",
@@ -221,15 +221,13 @@ def test_csv_export_headers_human_override_prompt_and_metadata(tmp_path, monkeyp
         "label_source",
         "confidence",
         "unsafe_category",
+        "created_at",
+        "updated_at",
         "metadata",
     ]
     for index in range(1, 4):
         assert f"vote_{index}_model" in rows[0]
         assert f"vote_{index}_label" in rows[0]
-        assert f"vote_{index}_confidence" in rows[0]
-        assert f"vote_{index}_unsafe_category" in rows[0]
-        assert f"vote_{index}_rationale" in rows[0]
-        assert f"vote_{index}_parse_error" in rows[0]
     assert rows[0]["prompt_id"] == "p1"
     assert rows[0]["prompt"] == 'Review "quoted" fraud analytics, safely.'
     assert rows[0]["response"] == ""
@@ -237,11 +235,11 @@ def test_csv_export_headers_human_override_prompt_and_metadata(tmp_path, monkeyp
     assert rows[0]["label_source"] == "human"
     assert rows[0]["confidence"] == ""
     assert rows[0]["unsafe_category"] == "phishing"
+    assert rows[0]["created_at"]
+    assert rows[0]["updated_at"]
     assert json.loads(rows[0]["metadata"]) == {"dataset": "unit,csv", "nested": {"x": 1}}
     assert rows[0]["vote_1_model"]
     assert rows[0]["vote_1_label"] == "safe"
-    assert rows[0]["vote_1_confidence"]
-    assert rows[0]["vote_1_rationale"]
 
     analysis = client.post(
         "/api/agreement/csv",
@@ -266,6 +264,46 @@ def test_analyze_csv_rejects_non_export_csv(monkeypatch):
 
     assert response.status_code == 400
     assert "model vote columns" in response.text
+
+
+def test_csv_upload_preserves_metadata_source(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
+    monkeypatch.setenv("MODEL_PROVIDER", "mock")
+    monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
+    client = ApiClient(app)
+
+    response = client.post(
+        "/api/annotate/csv",
+        content='prompt,metadata\nfirst prompt,"{""source"": ""LLMVA""}"\nsecond prompt,"{""source"": ""generic""}"\n',
+        headers={"Content-Type": "text/csv"},
+    )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    by_prompt = {item["prompt_text"]: item for item in results}
+    assert by_prompt["first prompt"]["metadata"]["source"] == "LLMVA"
+    assert by_prompt["second prompt"]["metadata"]["source"] == "generic"
+
+
+def test_clear_annotations_endpoint(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
+    monkeypatch.setenv("MODEL_PROVIDER", "mock")
+    monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
+    client = ApiClient(app)
+
+    client.post(
+        "/api/annotate",
+        json={
+            "prompt_id": "p1",
+            "prompt_text": "Review safely.",
+        },
+    )
+
+    response = client.request("DELETE", "/api/annotations")
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": True}
+    assert client.get("/api/annotations").json() == []
 
 
 def test_batch_provider_failure_counts_completed_human_review_and_provider_failed(tmp_path, monkeypatch):

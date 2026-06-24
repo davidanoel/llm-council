@@ -140,6 +140,14 @@ def review_queue() -> List[AnnotationResult]:
     return [AnnotationResult(**json.loads(row["payload"])) for row in rows]
 
 
+def clear_annotations() -> None:
+    """Remove all stored annotations."""
+
+    with closing(connect()) as connection:
+        connection.execute("DELETE FROM annotations")
+        connection.commit()
+
+
 def export_labels(include_prompt_text: bool = False) -> List[ExportedLabel]:
     """Export final labels, preferring latest human review."""
 
@@ -170,6 +178,8 @@ def export_labels(include_prompt_text: bool = False) -> List[ExportedLabel]:
                 response_text=annotation.response_text if include_prompt_text else None,
                 metadata=annotation.metadata,
                 votes=annotation.votes,
+                created_at=annotation.created_at,
+                updated_at=annotation.updated_at,
             )
         )
     return exported

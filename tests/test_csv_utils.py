@@ -23,7 +23,7 @@ def test_csv_parsing_optional_response_column():
 
 def test_csv_parsing_missing_prompt_column():
     with pytest.raises(ValueError, match="prompt"):
-        parse_csv_annotations("prompt_id,text\np1,hello\n")
+        parse_csv_annotations("prompt_id,metadata\np1,{\"source\":\"generic\"}\n")
 
 
 def test_csv_rows_without_prompt_id_get_deterministic_ids():

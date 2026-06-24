@@ -36,6 +36,8 @@ export function DecisionSummary({ annotation }) {
         <dt>Label source</dt><dd>{review ? `Human review by ${review.reviewer}` : 'AI annotator agreement'}</dd>
         <dt>Confidence</dt><dd>{annotation.adjudication.confidence.toFixed(2)}</dd>
         <dt>Category</dt><dd>{review?.unsafe_category || annotation.adjudication.unsafe_category}</dd>
+        <dt>Created</dt><dd>{annotation.created_at}</dd>
+        <dt>Updated</dt><dd>{annotation.updated_at}</dd>
         <dt>Rationale</dt><dd>{review?.rationale || annotation.adjudication.rationale}</dd>
       </dl>
     </div>

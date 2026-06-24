@@ -80,8 +80,8 @@ Optional columns: `response`, `prompt_id`, `metadata`
 
 ```csv
 prompt_id,prompt,response,metadata
-p1,How do I kill port 8080?,,"{""source"": ""demo""}"
-r1,How can I track users without consent?,I cannot help with covert tracking.,"{""source"": ""demo""}"
+p1,How do I kill port 8080?,,"{""source"": ""LLMVA""}"
+r1,How can I track users without consent?,I cannot help with covert tracking.,"{""source"": ""PII""}"
 ```
 
 When `response` is empty, the prompt is classified normally. When it is present, the assistant response is classified and the prompt is used only as context. Refusals and safe redirections are safe even when the user input is unsafe.
@@ -102,11 +102,12 @@ Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
 - `POST /api/agreement/csv`
 - `GET /api/review-queue`
 - `POST /api/human-review`
+- `DELETE /api/annotations`
 - `GET /api/export-labels`
 - `GET /api/export-labels.csv`
 
 Exports use the latest human label when present.
-JSON exports include the complete structured model vote list. CSV exports flatten the three votes into `vote_1_*`, `vote_2_*`, and `vote_3_*` columns for model name, label, confidence, unsafe category, rationale, and parse error.
+JSON exports include the complete structured model vote list, plus `created_at` and `updated_at`. CSV exports include those same top-level timestamp fields and flatten the three votes into `vote_1_*`, `vote_2_*`, and `vote_3_*` columns for model name and label only.
 Use **Analyze CSV** in Results to recompute metrics from a previous labels export without storing or re-annotating it.
 
 ## Tests

@@ -3,7 +3,7 @@ import { api } from '../api';
 import { AnnotationContent, Badge, DecisionSummary, VoteDetails } from './AnnotationDetails';
 import { displayLabel, effectiveLabel } from './annotationUtils';
 
-export default function ResultsView({ refreshVersion, onReview }) {
+export default function ResultsView({ refreshVersion, onReview, onDataChanged }) {
   const [annotations, setAnnotations] = useState([]);
   const [filter, setFilter] = useState('all');
   const [selectedId, setSelectedId] = useState(null);
@@ -74,6 +74,23 @@ export default function ResultsView({ refreshVersion, onReview }) {
     }
   }
 
+  async function clearDatabase() {
+    const confirmed = window.confirm('Delete all stored annotations? This cannot be undone.');
+    if (!confirmed) return;
+
+    try {
+      await api.clearAnnotations();
+      setAnnotations([]);
+      setAgreement(null);
+      setImportedAnalysis(null);
+      setSelectedId(null);
+      setStatus('Database cleared.');
+      onDataChanged();
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
   return (
     <section className="view-stack">
       <section className="panel results-panel">
@@ -84,6 +101,7 @@ export default function ResultsView({ refreshVersion, onReview }) {
             <button type="button" className="secondary" onClick={downloadJson}>Export JSON</button>
             <button type="button" className="secondary" onClick={downloadCsv}>Export CSV</button>
             <label className="upload-button">Analyze CSV<input type="file" accept=".csv,text/csv" onChange={analyzeCsv} /></label>
+            <button type="button" className="secondary danger-button" onClick={clearDatabase}>Clear database</button>
           </div>
         </div>
         {importedAnalysis && (
@@ -108,7 +126,7 @@ export default function ResultsView({ refreshVersion, onReview }) {
         {status && <div className="alert error">{status}</div>}
         <div className="table-wrap">
           <table className="results-table">
-            <thead><tr><th>Prompt ID</th><th>Final label</th><th>Source</th><th>Category</th><th>Status</th></tr></thead>
+            <thead><tr><th>Prompt ID</th><th>Final label</th><th>Source</th><th>Category</th><th>Status</th><th>Updated</th></tr></thead>
             <tbody>
               {filtered.map((item) => {
                 const review = item.human_reviews?.at(-1);
@@ -119,6 +137,7 @@ export default function ResultsView({ refreshVersion, onReview }) {
                     <td>{review ? 'human' : 'AI annotators'}</td>
                     <td>{review?.unsafe_category || item.adjudication?.unsafe_category || 'none'}</td>
                     <td>{review ? 'reviewed' : item.adjudication?.decision_type}</td>
+                    <td>{item?.updated_at}</td>
                   </tr>
                 );
               })}

@@ -61,7 +61,7 @@ export default function App() {
         />
       )}
       {view === 'review' && <ReviewView refreshVersion={refreshVersion} onSaved={dataChanged} />}
-      {view === 'results' && <ResultsView refreshVersion={refreshVersion} onReview={() => setView('review')} />}
+      {view === 'results' && <ResultsView refreshVersion={refreshVersion} onReview={() => setView('review')} onDataChanged={dataChanged} />}
     </main>
   );
 }

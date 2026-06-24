@@ -134,6 +134,8 @@ class ExportedLabel(BaseModel):
     response_text: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
     votes: List[ModelVote] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
 
 
 class AgreementMetrics(BaseModel):

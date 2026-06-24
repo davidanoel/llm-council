@@ -84,10 +84,10 @@ def analyze_export_csv(csv_text: str) -> ExportAnalysis:
                     prompt_id=prompt_id,
                     model_name=model_name,
                     label=(row.get(f"vote_{index}_label") or "").strip(),
-                    confidence=float(row.get(f"vote_{index}_confidence") or 0),
-                    unsafe_category=(row.get(f"vote_{index}_unsafe_category") or "").strip() or "none",
-                    rationale=row.get(f"vote_{index}_rationale") or "",
-                    parse_error=(row.get(f"vote_{index}_parse_error") or "").strip() or None,
+                    confidence=0,
+                    unsafe_category="none",
+                    rationale="",
+                    parse_error=None,
                 )
             )
         annotations.append(

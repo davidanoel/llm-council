@@ -56,6 +56,12 @@ export const api = {
     return request('/api/annotations');
   },
 
+  clearAnnotations() {
+    return request('/api/annotations', {
+      method: 'DELETE',
+    });
+  },
+
   agreement() {
     return request('/api/agreement');
   },

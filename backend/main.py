@@ -215,6 +215,14 @@ async def human_review(request: HumanReviewRequest) -> AnnotationResult:
         raise HTTPException(status_code=404, detail="Annotation not found") from None
 
 
+@app.delete("/api/annotations")
+async def clear_annotations() -> dict:
+    """Delete all stored annotations."""
+
+    storage.clear_annotations()
+    return {"deleted": True}
+
+
 @app.get("/api/export-labels", response_model=List[ExportedLabel])
 async def export_labels(include_prompt_text: bool = Query(default=False)) -> List[ExportedLabel]:
     """Export labels, preferring human overrides."""
@@ -247,9 +255,11 @@ def labels_to_csv(labels: List[ExportedLabel]) -> str:
         "label_source",
         "confidence",
         "unsafe_category",
+        "created_at",
+        "updated_at",
         "metadata",
     ]
-    vote_fields = ["model", "label", "confidence", "unsafe_category", "rationale", "parse_error"]
+    vote_fields = ["model", "label"]
     fieldnames.extend(
         f"vote_{index}_{field}"
         for index in range(1, 4)
@@ -266,6 +276,8 @@ def labels_to_csv(labels: List[ExportedLabel]) -> str:
             "label_source": label.label_source,
             "confidence": "" if label.confidence is None else label.confidence,
             "unsafe_category": label.unsafe_category,
+            "created_at": label.created_at,
+            "updated_at": label.updated_at,
             "metadata": json.dumps(label.metadata, sort_keys=True),
         }
         for index in range(1, 4):
@@ -274,10 +286,6 @@ def labels_to_csv(labels: List[ExportedLabel]) -> str:
                 {
                     f"vote_{index}_model": vote.model_name if vote else "",
                     f"vote_{index}_label": vote.label if vote else "",
-                    f"vote_{index}_confidence": vote.confidence if vote else "",
-                    f"vote_{index}_unsafe_category": vote.unsafe_category if vote else "",
-                    f"vote_{index}_rationale": vote.rationale if vote else "",
-                    f"vote_{index}_parse_error": vote.parse_error or "" if vote else "",
                 }
             )
         writer.writerow(row)
