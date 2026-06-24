@@ -6,15 +6,33 @@ import { displayLabel, effectiveLabel } from './annotationUtils';
 export default function ResultsView({ refreshVersion, onReview, onDataChanged }) {
   const [annotations, setAnnotations] = useState([]);
   const [filter, setFilter] = useState('all');
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedId, setSelectedId] = useState(null);
   const [agreement, setAgreement] = useState(null);
   const [importedAnalysis, setImportedAnalysis] = useState(null);
   const [status, setStatus] = useState('');
   const [deletingId, setDeletingId] = useState(null);
 
-  const filtered = useMemo(() => annotations.filter((item) => (
-    filter === 'all' || effectiveLabel(item) === filter
-  )), [annotations, filter]);
+  const filtered = useMemo(() => annotations.filter((item) => {
+    const filterMatch = filter === 'all' || effectiveLabel(item) === filter;
+    if (!filterMatch) return false;
+    if (!searchQuery) return true;
+
+    const review = item.human_reviews?.at(-1);
+    const searchText = [
+      item.prompt_id,
+      item.prompt_text,
+      item.response_text,
+      item.adjudication?.unsafe_category,
+      item.adjudication?.decision_type,
+      review?.unsafe_category,
+      effectiveLabel(item),
+      displayLabel(effectiveLabel(item)),
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    return searchText.includes(searchQuery);
+  }), [annotations, filter, searchQuery]);
   const outcomeCounts = useMemo(() => ({
     safe: annotations.filter((item) => effectiveLabel(item) === 'safe').length,
     unsafe: annotations.filter((item) => effectiveLabel(item) === 'unsafe').length,
@@ -42,6 +60,25 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
       .catch((err) => { if (active) setStatus(err.message); });
     return () => { active = false; };
   }, [refreshVersion]);
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setSearchQuery(searchInput.trim().toLowerCase());
+    }, 180);
+
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  useEffect(() => {
+    if (!filtered.length) {
+      setSelectedId(null);
+      return;
+    }
+
+    if (!filtered.some((item) => item.prompt_id === selectedId)) {
+      setSelectedId(filtered[0].prompt_id);
+    }
+  }, [filtered, selectedId]);
 
   async function downloadCsv() {
     try {
@@ -117,9 +154,28 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
     }
   }
 
+  function handleResultTableKeyDown(event) {
+    if (!filtered.length) return;
+
+    const currentIndex = Math.max(0, filtered.findIndex((item) => item.prompt_id === selectedId));
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      const nextIndex = Math.min(filtered.length - 1, currentIndex + 1);
+      setSelectedId(filtered[nextIndex].prompt_id);
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      const nextIndex = Math.max(0, currentIndex - 1);
+      setSelectedId(filtered[nextIndex].prompt_id);
+    }
+  }
+
   return (
-    <section className="view-stack">
-      <section className="panel results-panel">
+    <section className="results-split">
+      <section className="panel results-panel results-list-panel">
         <div className="results-toolbar">
           <div><h2>Annotation results</h2><p className="muted">{filtered.length} of {annotations.length} items</p></div>
           <div className="button-row">
@@ -129,6 +185,16 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
             <label className="upload-button">Analyze CSV<input type="file" accept=".csv,text/csv" onChange={analyzeCsv} /></label>
             <button type="button" className="secondary danger-button" onClick={clearDatabase}>Clear database</button>
           </div>
+        </div>
+        <div className="search-row">
+          <label htmlFor="results-search" className="search-label">Search prompts</label>
+          <input
+            id="results-search"
+            type="search"
+            placeholder="Search by prompt id, text, response, status, or category"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+          />
         </div>
         {importedAnalysis && (
           <div className="metric-source">Metrics from <strong>{importedAnalysis.fileName}</strong><button type="button" className="filter" onClick={() => setImportedAnalysis(null)}>Use current data</button></div>
@@ -150,7 +216,7 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
           ))}
         </div>
         {status && <div className="alert error">{status}</div>}
-        <div className="table-wrap">
+        <div className="table-wrap" tabIndex={0} onKeyDown={handleResultTableKeyDown}>
           <table className="results-table">
             <thead><tr><th>Prompt ID</th><th>Final label</th><th>Source</th><th>Category</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead>
             <tbody>
@@ -184,15 +250,22 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
           </table>
         </div>
       </section>
-      {selected && (
-        <section className="panel result-inspector">
-          <h2>{selected.prompt_id}</h2>
-          <AnnotationContent annotation={selected} />
-          <DecisionSummary annotation={selected} />
-          {effectiveLabel(selected) === 'needs_human_review' && <button type="button" onClick={onReview}>Set human label</button>}
-          <details className="model-details"><summary>Show model votes</summary><VoteDetails annotation={selected} /></details>
-        </section>
-      )}
+      <section className="panel result-inspector sticky-inspector">
+        {selected ? (
+          <>
+            <h2>{selected.prompt_id}</h2>
+            <AnnotationContent annotation={selected} />
+            <DecisionSummary annotation={selected} />
+            {effectiveLabel(selected) === 'needs_human_review' && <button type="button" onClick={onReview}>Set human label</button>}
+            <details className="model-details"><summary>Show model votes</summary><VoteDetails annotation={selected} /></details>
+          </>
+        ) : (
+          <div className="empty-view compact-empty">
+            <h2>No prompt selected</h2>
+            <p>Use search or filters to choose a prompt from the list.</p>
+          </div>
+        )}
+      </section>
     </section>
   );
 }
