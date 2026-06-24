@@ -223,6 +223,16 @@ async def clear_annotations() -> dict:
     return {"deleted": True}
 
 
+@app.delete("/api/annotations/{prompt_id}")
+async def delete_annotation(prompt_id: str) -> dict:
+    """Delete one stored annotation."""
+
+    deleted = storage.delete_annotation(prompt_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Annotation not found")
+    return {"deleted": True, "prompt_id": prompt_id}
+
+
 @app.get("/api/export-labels", response_model=List[ExportedLabel])
 async def export_labels(include_prompt_text: bool = Query(default=False)) -> List[ExportedLabel]:
     """Export labels, preferring human overrides."""

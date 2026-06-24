@@ -4,6 +4,7 @@ import json
 from io import StringIO
 
 import httpx
+import pytest
 
 from backend import storage
 from backend.main import app
@@ -29,6 +30,30 @@ class ApiClient:
                 return await client.request(method, path, **kwargs)
 
         return asyncio.run(send())
+
+
+@pytest.fixture(autouse=True)
+def registry_env(monkeypatch):
+    monkeypatch.setenv(
+        "MODEL_REGISTRY_JSON",
+        json.dumps(
+            {
+                "chatgpt-5.1": {
+                    "url": "https://example.local/chatgpt",
+                    "family": "openai",
+                },
+                "gemini-3.1-pro": {
+                    "url": "https://example.local/gemini",
+                    "family": "gemini",
+                },
+                "claude-sonnet-4.5": {
+                    "url": "https://example.local/claude",
+                    "family": "anthropic",
+                },
+            }
+        ),
+    )
+    monkeypatch.setenv("COUNCIL_MODELS", "chatgpt-5.1,gemini-3.1-pro,claude-sonnet-4.5")
 
 
 def test_annotate_and_export_api(tmp_path, monkeypatch):
@@ -304,6 +329,37 @@ def test_clear_annotations_endpoint(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.json() == {"deleted": True}
     assert client.get("/api/annotations").json() == []
+
+
+def test_delete_single_annotation_endpoint(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
+    monkeypatch.setenv("MODEL_PROVIDER", "mock")
+    monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
+    client = ApiClient(app)
+
+    client.post(
+        "/api/annotate",
+        json={
+            "prompt_id": "p1",
+            "prompt_text": "Delete just one prompt.",
+        },
+    )
+
+    deleted = client.request("DELETE", "/api/annotations/p1")
+
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": True, "prompt_id": "p1"}
+    assert client.get("/api/annotations").json() == []
+
+
+def test_delete_single_annotation_missing_returns_404(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
+    client = ApiClient(app)
+
+    response = client.request("DELETE", "/api/annotations/missing")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Annotation not found"
 
 
 def test_batch_provider_failure_counts_completed_human_review_and_provider_failed(tmp_path, monkeypatch):

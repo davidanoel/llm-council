@@ -148,6 +148,18 @@ def clear_annotations() -> None:
         connection.commit()
 
 
+def delete_annotation(prompt_id: str) -> bool:
+    """Delete one stored annotation by prompt id."""
+
+    with closing(connect()) as connection:
+        cursor = connection.execute(
+            "DELETE FROM annotations WHERE prompt_id = ?",
+            (prompt_id,),
+        )
+        connection.commit()
+    return cursor.rowcount > 0
+
+
 def export_labels(include_prompt_text: bool = False) -> List[ExportedLabel]:
     """Export final labels, preferring latest human review."""
 

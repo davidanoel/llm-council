@@ -509,6 +509,16 @@ th {
   background: #eef5f9;
 }
 
+.row-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.row-actions button {
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
 code {
   padding: 1px 4px;
   border-radius: 3px;

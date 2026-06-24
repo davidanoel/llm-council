@@ -57,3 +57,27 @@ def test_review_queue(tmp_path, monkeypatch):
     storage.save_annotation(annotation)
 
     assert [item.prompt_id for item in storage.review_queue()] == ["p1"]
+
+
+def test_delete_single_annotation(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
+    annotation = AnnotationResult(
+        prompt_id="p1",
+        prompt_text="Remove this prompt.",
+        adjudication=CouncilDecision(
+            prompt_id="p1",
+            final_label="safe",
+            unsafe_category="none",
+            confidence=0.9,
+            rationale="Safe.",
+            decision_type="auto_safe",
+        ),
+        created_at=utc_now(),
+        updated_at=utc_now(),
+    )
+
+    storage.save_annotation(annotation)
+
+    assert storage.delete_annotation("p1") is True
+    assert storage.load_annotation("p1") is None
+    assert storage.delete_annotation("missing") is False

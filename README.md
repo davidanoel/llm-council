@@ -112,6 +112,7 @@ Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
 - `GET /api/review-queue`
 - `POST /api/human-review`
 - `DELETE /api/annotations`
+- `DELETE /api/annotations/{prompt_id}`
 - `GET /api/export-labels`
 - `GET /api/export-labels.csv`
 

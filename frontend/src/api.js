@@ -62,6 +62,12 @@ export const api = {
     });
   },
 
+  deleteAnnotation(promptId) {
+    return request(`/api/annotations/${encodeURIComponent(promptId)}`, {
+      method: 'DELETE',
+    });
+  },
+
   agreement() {
     return request('/api/agreement');
   },

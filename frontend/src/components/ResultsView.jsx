@@ -10,6 +10,7 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
   const [agreement, setAgreement] = useState(null);
   const [importedAnalysis, setImportedAnalysis] = useState(null);
   const [status, setStatus] = useState('');
+  const [deletingId, setDeletingId] = useState(null);
 
   const filtered = useMemo(() => annotations.filter((item) => (
     filter === 'all' || effectiveLabel(item) === filter
@@ -91,6 +92,31 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
     }
   }
 
+  async function deletePrompt(item) {
+    const confirmed = window.confirm(`Delete prompt ${item.prompt_id}? This cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      setDeletingId(item.prompt_id);
+      await api.deleteAnnotation(item.prompt_id);
+      const next = annotations.filter((entry) => entry.prompt_id !== item.prompt_id);
+      setAnnotations(next);
+      setSelectedId((current) => {
+        if (current !== item.prompt_id) return current;
+        return next[0]?.prompt_id || null;
+      });
+      setImportedAnalysis(null);
+      const metrics = await api.agreement();
+      setAgreement(metrics);
+      setStatus(`Deleted ${item.prompt_id}.`);
+      onDataChanged();
+    } catch (err) {
+      setStatus(err.message);
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <section className="view-stack">
       <section className="panel results-panel">
@@ -126,7 +152,7 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
         {status && <div className="alert error">{status}</div>}
         <div className="table-wrap">
           <table className="results-table">
-            <thead><tr><th>Prompt ID</th><th>Final label</th><th>Source</th><th>Category</th><th>Status</th><th>Updated</th></tr></thead>
+            <thead><tr><th>Prompt ID</th><th>Final label</th><th>Source</th><th>Category</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead>
             <tbody>
               {filtered.map((item) => {
                 const review = item.human_reviews?.at(-1);
@@ -138,6 +164,19 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
                     <td>{review?.unsafe_category || item.adjudication?.unsafe_category || 'none'}</td>
                     <td>{review ? 'reviewed' : item.adjudication?.decision_type}</td>
                     <td>{item?.updated_at}</td>
+                    <td className="row-actions">
+                      <button
+                        type="button"
+                        className="secondary danger-button"
+                        disabled={deletingId === item.prompt_id}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          deletePrompt(item);
+                        }}
+                      >
+                        {deletingId === item.prompt_id ? 'Deleting...' : 'Delete'}
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
