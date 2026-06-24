@@ -24,6 +24,21 @@ _http_client: Optional[httpx.AsyncClient] = None
 TOKEN_CACHE_SECONDS = 3000
 
 DEFAULT_COUNCIL_MODELS = ["chatgpt-5.1", "gemini-3.1-pro", "claude-sonnet-4.5"]
+DEFAULT_MODEL_REGISTRY = {
+    "chatgpt-5.1": {
+        "url": "https://ewp.aexp.com/chatgpt-5.1",
+        "family": "openai",
+    },
+    "gemini-3.1-pro": {
+        "url": "https://ewp.aexp.com/gemini-3.1-pro",
+        "family": "gemini",
+    },
+    "claude-sonnet-4.5": {
+        "url": "https://ewp.aexp.com/claude-sonnet-4.5",
+        "family": "anthropic",
+    },
+}
+MODEL_FAMILIES = {"openai", "gemini", "anthropic", "generic"}
 LABELS = ["safe", "unsafe", "needs_human_review"]
 UNSAFE_CATEGORIES = [
     "malware",
@@ -46,27 +61,69 @@ class ModelResponseError(ValueError):
     """Raised when a model response cannot be read."""
 
 
-def model_urls() -> Dict[str, str]:
-    """Return configured internal URLs for known models."""
+def _normalized_family(value: Any) -> str:
+    """Return a normalized model family string."""
 
-    return {
-        "chatgpt-5.1": os.getenv("CHATGPT_5_1_URL", "https://ewp.aexp.com/chatgpt-5.1"),
-        "gemini-3.1-pro": os.getenv("GEMINI_3_1_PRO_URL", "https://ewp.aexp.com/gemini-3.1-pro"),
-        "claude-sonnet-4.5": os.getenv("CLAUDE_SONNET_4_5_URL", "https://ewp.aexp.com/claude-sonnet-4.5"),
-    }
+    family = str(value or "").strip().lower()
+    if family not in MODEL_FAMILIES:
+        raise ValueError(
+            f"Unsupported model family: {value!r}. Expected one of {sorted(MODEL_FAMILIES)}"
+        )
+    return family
+
+
+def _validate_model_registry(registry: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
+    """Validate and normalize the model registry object."""
+
+    normalized: Dict[str, Dict[str, str]] = {}
+    for alias, entry in registry.items():
+        if not isinstance(entry, dict):
+            raise ValueError(f"MODEL_REGISTRY_JSON entry for {alias!r} must be an object")
+
+        url = str(entry.get("url", "")).strip()
+        if not url:
+            raise ValueError(f"MODEL_REGISTRY_JSON entry for {alias!r} must include a non-empty 'url'")
+        family = _normalized_family(entry.get("family"))
+        normalized[str(alias).strip()] = {"url": url, "family": family}
+
+    if not normalized:
+        raise ValueError("MODEL_REGISTRY_JSON must define at least one model entry")
+    return normalized
+
+
+def get_model_registry() -> Dict[str, Dict[str, str]]:
+    """Return model alias configuration from MODEL_REGISTRY_JSON."""
+
+    raw_registry = os.getenv("MODEL_REGISTRY_JSON", "").strip()
+    if not raw_registry:
+        return _validate_model_registry(DEFAULT_MODEL_REGISTRY)
+
+    try:
+        parsed = json.loads(raw_registry)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"MODEL_REGISTRY_JSON must be valid JSON: {exc}") from exc
+
+    if not isinstance(parsed, dict):
+        raise ValueError("MODEL_REGISTRY_JSON must be a JSON object")
+    return _validate_model_registry(parsed)
+
+
+def get_model_config(model_name: str) -> Dict[str, str]:
+    """Return validated model config for an alias."""
+
+    alias = model_name.strip()
+    registry = get_model_registry()
+    if alias not in registry:
+        raise ValueError(
+            f"Unknown model alias {alias!r}. Add it to MODEL_REGISTRY_JSON and include it in COUNCIL_MODELS if needed."
+        )
+    return registry[alias]
 
 
 def get_model_family(model_name: str) -> str:
     """Return provider family for a model name."""
 
-    normalized = model_name.strip().lower()
-    if normalized.startswith("chatgpt") or normalized.startswith("gpt"):
-        return "openai"
-    if normalized.startswith("gemini"):
-        return "gemini"
-    if normalized.startswith("claude"):
-        return "anthropic"
-    return "generic"
+    return get_model_config(model_name)["family"]
 
 
 def schema_for_output(output_kind: str) -> Dict[str, Any]:
@@ -116,19 +173,26 @@ def get_council_models() -> List[str]:
 
     configured = os.getenv("COUNCIL_MODELS")
     if not configured:
-        return DEFAULT_COUNCIL_MODELS
-    models = [model.strip() for model in configured.split(",") if model.strip()]
-    return models or DEFAULT_COUNCIL_MODELS
+        models = DEFAULT_COUNCIL_MODELS
+    else:
+        models = [model.strip() for model in configured.split(",") if model.strip()]
+        if not models:
+            models = DEFAULT_COUNCIL_MODELS
+
+    registry = get_model_registry()
+    unknown = [model for model in models if model not in registry]
+    if unknown:
+        raise ValueError(
+            "COUNCIL_MODELS contains aliases missing from MODEL_REGISTRY_JSON: "
+            + ", ".join(unknown)
+        )
+    return models
 
 
 def get_model_url(model_name: str) -> str:
     """Return the internal URL for a model."""
 
-    normalized = model_name.strip()
-    urls = model_urls()
-    if normalized in urls:
-        return urls[normalized]
-    return f"https://ewp.aexp.com/{normalized}"
+    return get_model_config(model_name)["url"]
 
 
 def build_openai_payload(

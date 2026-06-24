@@ -186,14 +186,35 @@ def test_internal_provider_caches_gcloud_token_for_anthropic(monkeypatch):
 
 
 def test_internal_model_url_mapping(monkeypatch):
-    monkeypatch.delenv("CHATGPT_5_1_URL", raising=False)
-    monkeypatch.delenv("GEMINI_3_1_PRO_URL", raising=False)
-    monkeypatch.delenv("CLAUDE_SONNET_4_5_URL", raising=False)
+    monkeypatch.delenv("MODEL_REGISTRY_JSON", raising=False)
 
     assert get_model_url("chatgpt-5.1") == "https://ewp.aexp.com/chatgpt-5.1"
     assert get_model_url("gemini-3.1-pro") == "https://ewp.aexp.com/gemini-3.1-pro"
     assert get_model_url("claude-sonnet-4.5") == "https://ewp.aexp.com/claude-sonnet-4.5"
-    assert get_model_url("custom-model") == "https://ewp.aexp.com/custom-model"
+
+
+def test_model_registry_allows_decoupled_alias_and_uri(monkeypatch):
+    monkeypatch.setenv(
+        "MODEL_REGISTRY_JSON",
+        json.dumps(
+            {
+                "claude-sonnet-4.5": {
+                    "url": "https://vertex.example/models/claude-opus-4-7:rawPredict",
+                    "family": "anthropic",
+                }
+            }
+        ),
+    )
+
+    assert get_model_url("claude-sonnet-4.5") == "https://vertex.example/models/claude-opus-4-7:rawPredict"
+    assert get_model_family("claude-sonnet-4.5") == "anthropic"
+
+
+def test_unknown_model_alias_raises_error(monkeypatch):
+    monkeypatch.delenv("MODEL_REGISTRY_JSON", raising=False)
+
+    with pytest.raises(ValueError, match="Unknown model alias"):
+        get_model_url("custom-model")
 
 
 def test_annotation_prompt_excludes_local_ids_and_metadata():

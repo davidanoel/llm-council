@@ -46,9 +46,18 @@ The default internal annotators are:
 
 ```env
 COUNCIL_MODELS=chatgpt-5.1,gemini-3.1-pro,claude-sonnet-4.5
+MODEL_REGISTRY_JSON={"chatgpt-5.1":{"url":"https://ewp.aexp.com/chatgpt-5.1","family":"openai"},"gemini-3.1-pro":{"url":"https://ewp.aexp.com/gemini-3.1-pro","family":"gemini"},"claude-sonnet-4.5":{"url":"https://ewp.aexp.com/claude-sonnet-4.5","family":"anthropic"}}
 ```
 
-Internal ChatGPT and Gemini requests use `INTERNAL_MODEL_API_KEY` when set, otherwise `backend/utils.py` obtains and caches an internal A2A JWT. Claude uses `ANTHROPIC_BEARER_TOKEN` when set, otherwise it obtains and caches `gcloud auth print-access-token`. Internal requests trust the company CA bundle provided by `amexcerts`. Keep credentials in `.env`; never commit them.
+Each `COUNCIL_MODELS` value must exist as a key in `MODEL_REGISTRY_JSON`.
+Model family and endpoint are taken from that registry entry:
+
+- `family=openai` uses the OpenAI-compatible payload adapter.
+- `family=gemini` uses the Gemini generateContent adapter.
+- `family=anthropic` uses the Anthropic rawPredict/messages adapter.
+- `family=generic` uses a generic chat payload adapter.
+
+Internal OpenAI/Gemini/generic requests use `INTERNAL_MODEL_API_KEY` when set, otherwise `backend/utils.py` obtains and caches an internal A2A JWT. Anthropic requests use `ANTHROPIC_BEARER_TOKEN` when set, otherwise they obtain and cache `gcloud auth print-access-token`. Internal requests trust the company CA bundle provided by `amexcerts`. Keep credentials in `.env`; never commit them.
 
 ## Run
 
