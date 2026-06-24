@@ -74,6 +74,7 @@ def get_a2a_jwt_token():
             "/genai/google/v1/models/llama32-90b-instruct/**::post",
             "/genai/google/v1/models/gemini-3.1-pro-preview/**::post",
             "/aifirewall/genai/google/v1/models/gemini-3.1-pro-preview/**::post",
+            "/aifirewall/genai/microsoft/v1/launchpad/models/**::post",
         ]
     }
 
