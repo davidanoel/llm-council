@@ -190,6 +190,42 @@ class ExportedLabel(BaseModel):
     updated_at: str
 
 
+class ExportPreview(BaseModel):
+    """Counts that describe export readiness for one run."""
+
+    run_id: str
+    run_name: str
+    task_type: TaskType
+    total_items: int
+    exportable_items: int
+    failed_items: int
+    unresolved_items: int
+    human_reviewed_items: int
+    ai_labeled_items: int
+
+
+class ExportManifest(BaseModel):
+    """Small manifest that travels with exported labels."""
+
+    run_id: str
+    run_name: str
+    source_filename: Optional[str] = None
+    task_type: TaskType
+    model_provider: Optional[str] = None
+    model_names: List[str] = Field(default_factory=list)
+    policy_version: str
+    decision_rule_version: str
+    total_items: int
+    exported_items: int
+    failed_items: int
+    unresolved_items: int
+    human_reviewed_items: int
+    ai_labeled_items: int
+    created_at: str
+    completed_at: Optional[str] = None
+    model_config_json: Dict[str, Any] = Field(default_factory=dict)
+
+
 class AgreementMetrics(BaseModel):
     """Dataset-level agreement among successful AI annotator panels."""
 

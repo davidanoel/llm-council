@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional
 from .schemas import (
     AnnotationResult,
     CouncilDecision,
+    ExportManifest,
+    ExportPreview,
     ExportedLabel,
     HumanReview,
     HumanReviewRequest,
@@ -681,3 +683,69 @@ def export_labels(
             )
         )
     return exported
+
+
+def export_preview(run_id: str) -> ExportPreview:
+    """Return derived counts that explain what an export will contain."""
+
+    run = load_run(run_id)
+    if run is None:
+        raise KeyError(f"Run {run_id} not found")
+
+    annotations = list_annotations(run_id=run_id)
+    exported = export_labels(include_prompt_text=False, run_id=run_id)
+    human_reviewed = sum(bool(annotation.human_reviews) for annotation in annotations)
+    unresolved = sum(
+        not annotation.human_reviews
+        and annotation.adjudication is not None
+        and annotation.adjudication.decision_type == "human_review"
+        for annotation in annotations
+    )
+    failed = sum(
+        not annotation.human_reviews and annotation.adjudication is None
+        for annotation in annotations
+    )
+
+    return ExportPreview(
+        run_id=run.run_id,
+        run_name=run.name,
+        task_type=run.task_type,
+        total_items=len(annotations),
+        exportable_items=len(exported),
+        failed_items=failed,
+        unresolved_items=unresolved,
+        human_reviewed_items=human_reviewed,
+        ai_labeled_items=max(0, len(exported) - human_reviewed),
+    )
+
+
+def export_manifest(run_id: str) -> ExportManifest:
+    """Return a compact manifest for downstream label handoff."""
+
+    run = load_run(run_id)
+    if run is None:
+        raise KeyError(f"Run {run_id} not found")
+    preview = export_preview(run_id)
+    model_names = run.model_config_json.get("models", [])
+    if not isinstance(model_names, list):
+        model_names = []
+
+    return ExportManifest(
+        run_id=run.run_id,
+        run_name=run.name,
+        source_filename=run.source_filename,
+        task_type=run.task_type,
+        model_provider=run.model_config_json.get("provider"),
+        model_names=model_names,
+        policy_version=run.policy_version,
+        decision_rule_version=run.decision_rule_version,
+        total_items=preview.total_items,
+        exported_items=preview.exportable_items,
+        failed_items=preview.failed_items,
+        unresolved_items=preview.unresolved_items,
+        human_reviewed_items=preview.human_reviewed_items,
+        ai_labeled_items=preview.ai_labeled_items,
+        created_at=run.created_at,
+        completed_at=run.completed_at,
+        model_config_json=run.model_config_json,
+    )

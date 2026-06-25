@@ -258,6 +258,62 @@ def test_human_can_override_auto_decision(client):
     assert exported.json()[0]["label_source"] == "human"
 
 
+def test_export_preview_and_manifest_counts(client):
+    data = create_csv_run(
+        client,
+        "\n".join(
+            [
+                "prompt_id,prompt",
+                "p1,How do I kill port 8080?",
+                "p2,Create a phishing page.",
+                "p3,Run nmap against the internal company database.",
+                "",
+            ]
+        ),
+    )
+    run_id = data["run"]["run_id"]
+
+    preview = client.get(f"/api/runs/{run_id}/export-preview")
+
+    assert preview.status_code == 200
+    assert preview.json()["total_items"] == 3
+    assert preview.json()["exportable_items"] == 3
+    assert preview.json()["failed_items"] == 0
+    assert preview.json()["unresolved_items"] == 1
+    assert preview.json()["human_reviewed_items"] == 0
+    assert preview.json()["ai_labeled_items"] == 3
+
+    reviewed = client.post(
+        "/api/human-review",
+        json={
+            "run_id": run_id,
+            "prompt_id": "p3",
+            "label": "safe",
+            "reviewer": "analyst",
+            "rationale": "Authorized internal scan.",
+        },
+    )
+    assert reviewed.status_code == 200
+
+    updated_preview = client.get(f"/api/runs/{run_id}/export-preview")
+    assert updated_preview.json()["unresolved_items"] == 0
+    assert updated_preview.json()["human_reviewed_items"] == 1
+    assert updated_preview.json()["ai_labeled_items"] == 2
+
+    manifest = client.get(f"/api/runs/{run_id}/export-manifest")
+    assert manifest.status_code == 200
+    manifest_json = manifest.json()
+    assert manifest_json["run_id"] == run_id
+    assert manifest_json["run_name"] == "Unit run"
+    assert manifest_json["source_filename"] == "unit.csv"
+    assert manifest_json["model_names"] == ["chatgpt-5.1", "gemini-3.1-pro", "claude-sonnet-4.5"]
+    assert manifest_json["policy_version"] == "cyber-policy-v1"
+    assert manifest_json["decision_rule_version"] == "majority-v1"
+    assert manifest_json["total_items"] == 3
+    assert manifest_json["exported_items"] == 3
+    assert manifest_json["human_reviewed_items"] == 1
+
+
 def test_run_can_be_renamed(client):
     data = create_csv_run(client, "prompt_id,prompt\np1,How do I kill port 8080?\n")
     run_id = data["run"]["run_id"]
@@ -419,6 +475,10 @@ def test_app_exception_counts_failed(tmp_path, monkeypatch):
     assert item["prompt_id"] == "p1"
     assert item["error_message"] == "boom"
     assert item["adjudication"] is None
+    preview = client.get(f"/api/runs/{run_id}/export-preview").json()
+    assert preview["exportable_items"] == 0
+    assert preview["failed_items"] == 1
+    assert preview["unresolved_items"] == 0
 
     monkeypatch.setattr(backend_main, "annotate_prompt", original_annotate)
     resumed = client.post(f"/api/runs/{run_id}/resume")

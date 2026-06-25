@@ -79,7 +79,7 @@ cd frontend && npm run dev
 
 1. **Annotate:** upload and validate a CSV, name the run, then explicitly start annotation.
 2. **Review:** resolve uncertain prompts for the selected run one at a time, filtered by review reason.
-3. **Results:** select a run, view AI agreement, resume failed rows, retry provider failures, inspect votes, override any final label when needed, and export JSON or CSV.
+3. **Results:** select a run, view AI agreement, resume failed rows, retry provider failures, inspect votes, override any final label when needed, preview export readiness, and export JSON, CSV, or a manifest.
 
 Review reasons are computed from the model votes:
 
@@ -134,10 +134,13 @@ Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
 - `DELETE /api/runs/{run_id}`
 - `DELETE /api/runs/{run_id}/items/{prompt_id}`
 - `GET /api/runs/{run_id}/export-labels`
+- `GET /api/runs/{run_id}/export-preview`
+- `GET /api/runs/{run_id}/export-manifest`
 - `GET /api/runs/{run_id}/export-labels.csv`
 
 Exports use the latest human label when present.
 JSON exports include the complete structured model vote list, run id/name, task type, row number, decision type, review reason, and timestamps. CSV exports include the same run/item traceability and flatten the three votes into `vote_1_*`, `vote_2_*`, and `vote_3_*` columns for model name, label, confidence, unsafe category, parse error, and rationale.
+The Results tab shows exportable rows, failed/unexportable rows, human overrides, and unresolved review items before download. Manifest exports include run metadata, model names, policy/rule versions, timestamps, and export counts.
 Use **Analyze CSV** in Results to recompute metrics from a previous labels export without storing or re-annotating it.
 
 ## Tests

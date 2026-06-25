@@ -30,8 +30,10 @@ from .schemas import (
     AgreementMetrics,
     BatchAnnotationResponse,
     BatchProgress,
-    ExportedLabel,
     ExportAnalysis,
+    ExportManifest,
+    ExportPreview,
+    ExportedLabel,
     HumanReviewRequest,
     ReviewReasonType,
     RunSummary,
@@ -445,6 +447,26 @@ async def export_run_labels(
     if not storage.load_run(run_id):
         raise HTTPException(status_code=404, detail="Run not found")
     return storage.export_labels(include_prompt_text=include_prompt_text, run_id=run_id)
+
+
+@app.get("/api/runs/{run_id}/export-preview", response_model=ExportPreview)
+async def export_run_preview(run_id: str) -> ExportPreview:
+    """Preview export readiness for one run."""
+
+    try:
+        return storage.export_preview(run_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Run not found") from None
+
+
+@app.get("/api/runs/{run_id}/export-manifest", response_model=ExportManifest)
+async def export_run_manifest(run_id: str) -> ExportManifest:
+    """Return an export manifest for one run."""
+
+    try:
+        return storage.export_manifest(run_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Run not found") from None
 
 
 @app.get("/api/runs/{run_id}/export-labels.csv")

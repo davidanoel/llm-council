@@ -18,6 +18,7 @@ export default function ResultsView({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedId, setSelectedId] = useState(null);
   const [agreement, setAgreement] = useState(null);
+  const [exportPreview, setExportPreview] = useState(null);
   const [importedAnalysis, setImportedAnalysis] = useState(null);
   const [status, setStatus] = useState('');
   const [deletingId, setDeletingId] = useState(null);
@@ -85,15 +86,17 @@ export default function ResultsView({
     if (!selectedRunId) {
       setAnnotations([]);
       setAgreement(null);
+      setExportPreview(null);
       setSelectedId(null);
       return () => { active = false; };
     }
 
-    Promise.all([api.runItems(selectedRunId), api.runAgreement(selectedRunId)])
-      .then(([items, metrics]) => {
+    Promise.all([api.runItems(selectedRunId), api.runAgreement(selectedRunId), api.exportPreview(selectedRunId)])
+      .then(([items, metrics, preview]) => {
         if (active) {
           setAnnotations(items);
           setAgreement(metrics);
+          setExportPreview(preview);
           setSelectedId((current) => current || items[0]?.prompt_id || null);
         }
       })
@@ -133,7 +136,7 @@ export default function ResultsView({
     if (!selectedRunId) return;
     try {
       const blob = await api.exportLabelsCsv(selectedRunId, true);
-      download(blob, 'labels.csv');
+      download(blob, exportFilename(selectedRun, 'labels', 'csv'));
     } catch (err) {
       setStatus(err.message);
     }
@@ -143,7 +146,20 @@ export default function ResultsView({
     if (!selectedRunId) return;
     try {
       const labels = await api.exportRunLabels(selectedRunId, true);
-      download(new Blob([JSON.stringify(labels, null, 2)], { type: 'application/json' }), 'labels.json');
+      download(new Blob([JSON.stringify(labels, null, 2)], { type: 'application/json' }), exportFilename(selectedRun, 'labels', 'json'));
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  async function downloadManifest() {
+    if (!selectedRunId) return;
+    try {
+      const manifest = await api.exportManifest(selectedRunId);
+      download(
+        new Blob([JSON.stringify(manifest, null, 2)], { type: 'application/json' }),
+        exportFilename(selectedRun, 'manifest', 'json'),
+      );
     } catch (err) {
       setStatus(err.message);
     }
@@ -184,13 +200,15 @@ export default function ResultsView({
     try {
       setRetrying(true);
       const response = await api.retryProviderFailures(selectedRunId);
-      const [items, metrics, runsList] = await Promise.all([
+      const [items, metrics, preview, runsList] = await Promise.all([
         api.runItems(selectedRunId),
         api.runAgreement(selectedRunId),
+        api.exportPreview(selectedRunId),
         api.listRuns(),
       ]);
       setAnnotations(items);
       setAgreement(metrics);
+      setExportPreview(preview);
       setRuns(runsList);
       setImportedAnalysis(null);
       setStatus(`Retried ${response.progress.completed} items; ${response.progress.failed} failed.`);
@@ -207,13 +225,15 @@ export default function ResultsView({
     try {
       setResuming(true);
       const response = await api.resumeRun(selectedRunId);
-      const [items, metrics, runsList] = await Promise.all([
+      const [items, metrics, preview, runsList] = await Promise.all([
         api.runItems(selectedRunId),
         api.runAgreement(selectedRunId),
+        api.exportPreview(selectedRunId),
         api.listRuns(),
       ]);
       setAnnotations(items);
       setAgreement(metrics);
+      setExportPreview(preview);
       setRuns(runsList);
       setImportedAnalysis(null);
       setStatus(`Resumed ${response.progress.completed} rows; ${response.progress.failed} failed.`);
@@ -236,6 +256,7 @@ export default function ResultsView({
       setRuns(nextRuns);
       setAnnotations([]);
       setAgreement(null);
+      setExportPreview(null);
       setImportedAnalysis(null);
       setSelectedId(null);
       onRunSelected(nextRuns[0]?.run_id || null);
@@ -261,7 +282,9 @@ export default function ResultsView({
       });
       setImportedAnalysis(null);
       const metrics = selectedRunId ? await api.runAgreement(selectedRunId) : null;
+      const preview = selectedRunId ? await api.exportPreview(selectedRunId) : null;
       setAgreement(metrics);
+      setExportPreview(preview);
       setStatus(`Deleted ${item.prompt_id}.`);
       onDataChanged();
     } catch (err) {
@@ -276,11 +299,13 @@ export default function ResultsView({
       setOverrideStatus('Saving override...');
       const updated = await api.humanReview(payload);
       setAnnotations((current) => current.map((item) => (item.prompt_id === updated.prompt_id ? updated : item)));
-      const [metrics, runsList] = await Promise.all([
+      const [metrics, preview, runsList] = await Promise.all([
         api.runAgreement(selectedRunId),
+        api.exportPreview(selectedRunId),
         api.listRuns(),
       ]);
       setAgreement(metrics);
+      setExportPreview(preview);
       setRuns(runsList);
       setImportedAnalysis(null);
       setOverrideStatus('Override saved.');
@@ -321,6 +346,7 @@ export default function ResultsView({
             {annotations.some((item) => effectiveLabel(item) === 'needs_human_review') && <button type="button" onClick={onReview}>Review unresolved</button>}
             <button type="button" className="secondary" disabled={!selectedRunId} onClick={downloadJson}>Export JSON</button>
             <button type="button" className="secondary" disabled={!selectedRunId} onClick={downloadCsv}>Export CSV</button>
+            <button type="button" className="secondary" disabled={!selectedRunId} onClick={downloadManifest}>Export manifest</button>
             <label className="upload-button">Analyze CSV<input type="file" accept=".csv,text/csv" onChange={analyzeCsv} /></label>
             {selectedRun?.provider_failed > 0 && (
               <button type="button" className="secondary" disabled={retrying} onClick={retryProviderFailures}>
@@ -393,6 +419,14 @@ export default function ResultsView({
         </div>
         {importedAnalysis && (
           <div className="metric-source">Metrics from <strong>{importedAnalysis.fileName}</strong><button type="button" className="filter" onClick={() => setImportedAnalysis(null)}>Use current data</button></div>
+        )}
+        {exportPreview && !importedAnalysis && (
+          <div className="metrics-grid export-preview">
+            <div><span>Exportable rows</span><strong>{formatRatio(exportPreview.exportable_items, exportPreview.total_items)}</strong></div>
+            <div><span>Failed/unexportable</span><strong>{formatRatio(exportPreview.failed_items, exportPreview.total_items)}</strong></div>
+            <div><span>Human overrides</span><strong>{formatRatio(exportPreview.human_reviewed_items, exportPreview.total_items)}</strong></div>
+            <div><span>Unresolved review</span><strong>{formatRatio(exportPreview.unresolved_items, exportPreview.total_items)}</strong></div>
+          </div>
         )}
         {displayedAgreement && (
           <div className="metrics-grid agreement-summary">
@@ -490,6 +524,19 @@ function download(blob, filename) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function exportFilename(run, kind, extension) {
+  return `${safeFilename(run?.name || 'annotation-run')}-${kind}.${extension}`;
+}
+
+function safeFilename(value) {
+  const cleaned = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return cleaned || 'annotation-run';
 }
 
 function formatPercent(value) {

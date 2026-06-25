@@ -113,6 +113,14 @@ export const api = {
     return request(`/api/runs/${encodeURIComponent(runId)}/export-labels?include_prompt_text=${includePromptText}`);
   },
 
+  exportPreview(runId) {
+    return request(`/api/runs/${encodeURIComponent(runId)}/export-preview`);
+  },
+
+  exportManifest(runId) {
+    return request(`/api/runs/${encodeURIComponent(runId)}/export-manifest`);
+  },
+
   async exportLabelsCsv(runId, includePromptText = false) {
     const path = `/api/runs/${encodeURIComponent(runId)}/export-labels.csv?include_prompt_text=${includePromptText}`;
     const response = await fetch(`${API_BASE}${path}`);
