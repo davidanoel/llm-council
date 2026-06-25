@@ -419,16 +419,6 @@ export default function ResultsView({
           </>
         )}
 
-        <div className="search-row">
-          <label htmlFor="results-search" className="search-label">Search prompts</label>
-          <input
-            id="results-search"
-            type="search"
-            placeholder="Search by prompt id, text, response, status, or category"
-            value={searchInput}
-            onChange={(event) => setSearchInput(event.target.value)}
-          />
-        </div>
         {importedAnalysis && (
           <div className="metric-source">Metrics from <strong>{importedAnalysis.fileName}</strong><button type="button" className="filter" onClick={() => setImportedAnalysis(null)}>Use current data</button></div>
         )}
@@ -505,6 +495,16 @@ export default function ResultsView({
           >
             {direction === 'asc' ? 'Asc' : 'Desc'}
           </button>
+        </div>
+        <div className="search-row">
+          <label htmlFor="results-search" className="search-label">Search prompts</label>
+          <input
+            id="results-search"
+            type="search"
+            placeholder="Search by prompt id, text, response, or error"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+          />
         </div>
         {status && <div className="alert error">{status}</div>}
         <div className="table-wrap" tabIndex={0} onKeyDown={handleResultTableKeyDown}>
