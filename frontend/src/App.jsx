@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from './api';
 import AnnotateView from './components/AnnotateView';
+import QaView from './components/QaView';
 import ReviewView from './components/ReviewView';
 import ResultsView from './components/ResultsView';
 import './App.css';
@@ -9,6 +10,7 @@ const VIEWS = [
   ['annotate', 'Annotate'],
   ['review', 'Review'],
   ['results', 'Results'],
+  ['qa', 'QA'],
 ];
 
 export default function App() {
@@ -80,6 +82,13 @@ export default function App() {
           onRunSelected={setSelectedRunId}
           onReview={() => setView('review')}
           onDataChanged={dataChanged}
+        />
+      )}
+      {view === 'qa' && (
+        <QaView
+          refreshVersion={refreshVersion}
+          selectedRunId={selectedRunId}
+          onRunSelected={setSelectedRunId}
         />
       )}
     </main>

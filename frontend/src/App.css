@@ -541,6 +541,17 @@ legend {
   margin-bottom: 12px;
 }
 
+.qa-selectors {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.qa-table-wrap {
+  max-height: none;
+}
+
 .results-split {
   display: grid;
   grid-template-columns: minmax(560px, 1.7fr) minmax(340px, 1fr);
