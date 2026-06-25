@@ -91,8 +91,9 @@ export const api = {
     });
   },
 
-  runReviewQueue(runId) {
-    return request(`/api/runs/${encodeURIComponent(runId)}/review-queue`);
+  runReviewQueue(runId, reasonType = null) {
+    const suffix = reasonType && reasonType !== 'all' ? `?reason_type=${encodeURIComponent(reasonType)}` : '';
+    return request(`/api/runs/${encodeURIComponent(runId)}/review-queue${suffix}`);
   },
 
   humanReview(payload) {

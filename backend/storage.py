@@ -20,6 +20,7 @@ from .schemas import (
     RunSummary,
     utc_now,
 )
+from .review_reason import classify_review_reason, vote_failed
 
 
 DB_PATH = os.getenv("ANNOTATION_DB_PATH", "data/annotations.db")
@@ -254,21 +255,16 @@ def build_run_summary(connection: sqlite3.Connection, row: sqlite3.Row) -> RunSu
         """,
         (row["run_id"],),
     ).fetchone()
-    provider_failed = connection.execute(
-        """
-        SELECT COUNT(*) AS provider_failed
-        FROM items i
-        WHERE i.run_id = ?
-          AND EXISTS (SELECT 1 FROM model_votes mv WHERE mv.item_id = i.item_id)
-          AND NOT EXISTS (
-              SELECT 1 FROM model_votes mv
-              WHERE mv.item_id = i.item_id
-                AND mv.parse_error IS NULL
-                AND instr(mv.policy_triggers_json, 'provider_failure') = 0
-          )
-        """,
+    annotations = [build_annotation(connection, row["item_id"]) for row in connection.execute(
+        "SELECT item_id FROM items WHERE run_id = ?",
         (row["run_id"],),
-    ).fetchone()["provider_failed"]
+    ).fetchall()]
+    reason_counts = {
+        "provider_failure": sum(item.review_reason_type == "provider_failure" for item in annotations),
+        "disagreement": sum(item.review_reason_type == "disagreement" for item in annotations),
+        "abstention": sum(item.review_reason_type == "abstention" for item in annotations),
+        "ambiguous": sum(item.review_reason_type == "ambiguous" for item in annotations),
+    }
     return RunSummary(
         run_id=row["run_id"],
         name=row["name"],
@@ -283,7 +279,10 @@ def build_run_summary(connection: sqlite3.Connection, row: sqlite3.Row) -> RunSu
         auto_safe=counts["auto_safe"] or 0,
         auto_unsafe=counts["auto_unsafe"] or 0,
         human_review=counts["human_review"] or 0,
-        provider_failed=provider_failed or 0,
+        provider_failed=reason_counts["provider_failure"],
+        disagreement=reason_counts["disagreement"],
+        abstention=reason_counts["abstention"],
+        ambiguous=reason_counts["ambiguous"],
         created_at=row["created_at"],
         completed_at=row["completed_at"],
     )
@@ -502,7 +501,7 @@ def build_annotation(connection: sqlite3.Connection, item_id: str) -> Annotation
             (item_id,),
         ).fetchall()
     ]
-    return AnnotationResult(
+    annotation = AnnotationResult(
         item_id=item["item_id"],
         run_id=item["run_id"],
         prompt_id=item["prompt_id"],
@@ -516,6 +515,11 @@ def build_annotation(connection: sqlite3.Connection, item_id: str) -> Annotation
         created_at=item["created_at"],
         updated_at=item["updated_at"],
     )
+    suggestion = classify_review_reason(annotation)
+    annotation.review_reason_type = suggestion.reason_type
+    annotation.suggested_label = suggestion.suggested_label
+    annotation.suggested_unsafe_category = suggestion.suggested_unsafe_category
+    return annotation
 
 
 def add_human_review(request: HumanReviewRequest) -> AnnotationResult:
@@ -591,12 +595,6 @@ def delete_annotation(prompt_id: str, run_id: str) -> bool:
     return cursor.rowcount > 0
 
 
-def vote_failed(vote: ModelVote) -> bool:
-    """Return whether a model vote failed due to provider or parse issues."""
-
-    return vote.parse_error is not None or "provider_failure" in vote.policy_triggers
-
-
 def export_labels(
     include_prompt_text: bool = False,
     run_id: str = "",
@@ -634,6 +632,7 @@ def export_labels(
                 label=label,
                 label_source=source,
                 decision_type=annotation.adjudication.decision_type if annotation.adjudication else "human_review",
+                review_reason_type=annotation.review_reason_type,
                 confidence=confidence,
                 unsafe_category=unsafe_category,
                 human_review_rationale=human_review_rationale,

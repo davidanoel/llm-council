@@ -33,6 +33,7 @@ from .schemas import (
     ExportedLabel,
     ExportAnalysis,
     HumanReviewRequest,
+    ReviewReasonType,
     RunSummary,
     RunUpdate,
     utc_now,
@@ -297,12 +298,18 @@ async def agreement_from_csv(csv_text: str = Body(..., media_type="text/csv")) -
 
 
 @app.get("/api/runs/{run_id}/review-queue", response_model=List[AnnotationResult])
-async def get_run_review_queue(run_id: str) -> List[AnnotationResult]:
+async def get_run_review_queue(
+    run_id: str,
+    reason_type: ReviewReasonType | None = Query(default=None),
+) -> List[AnnotationResult]:
     """List annotations requiring human review in one run."""
 
     if not storage.load_run(run_id):
         raise HTTPException(status_code=404, detail="Run not found")
-    return storage.review_queue(run_id=run_id)
+    items = storage.review_queue(run_id=run_id)
+    if reason_type and reason_type != "none":
+        return [item for item in items if item.review_reason_type == reason_type]
+    return items
 
 
 @app.post("/api/human-review", response_model=AnnotationResult)
@@ -390,6 +397,7 @@ def labels_to_csv(labels: List[ExportedLabel]) -> str:
         "label",
         "label_source",
         "decision_type",
+        "review_reason_type",
         "confidence",
         "unsafe_category",
         "human_review_rationale",
@@ -417,6 +425,7 @@ def labels_to_csv(labels: List[ExportedLabel]) -> str:
             "label": label.label,
             "label_source": label.label_source,
             "decision_type": label.decision_type,
+            "review_reason_type": label.review_reason_type,
             "confidence": "" if label.confidence is None else label.confidence,
             "unsafe_category": label.unsafe_category,
             "human_review_rationale": label.human_review_rationale or "",

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { AnnotationContent, Badge, DecisionSummary, VoteDetails } from './AnnotationDetails';
+import HumanLabelForm from './HumanLabelForm';
 import { displayLabel, effectiveLabel } from './annotationUtils';
 
 export default function ResultsView({
@@ -23,6 +24,8 @@ export default function ResultsView({
   const [runNameDraft, setRunNameDraft] = useState('');
   const [savingRunName, setSavingRunName] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideStatus, setOverrideStatus] = useState('');
 
   const selectedRun = runs.find((run) => run.run_id === selectedRunId);
   const filtered = useMemo(() => annotations.filter((item) => {
@@ -37,6 +40,7 @@ export default function ResultsView({
       item.response_text,
       item.adjudication?.unsafe_category,
       item.adjudication?.decision_type,
+      item.review_reason_type,
       review?.unsafe_category,
       effectiveLabel(item),
       displayLabel(effectiveLabel(item)),
@@ -115,6 +119,11 @@ export default function ResultsView({
       setSelectedId(filtered[0].prompt_id);
     }
   }, [filtered, selectedId]);
+
+  useEffect(() => {
+    setOverrideOpen(false);
+    setOverrideStatus('');
+  }, [selectedId]);
 
   async function downloadCsv() {
     if (!selectedRunId) return;
@@ -235,6 +244,25 @@ export default function ResultsView({
     }
   }
 
+  async function saveOverride(payload) {
+    try {
+      setOverrideStatus('Saving override...');
+      const updated = await api.humanReview(payload);
+      setAnnotations((current) => current.map((item) => (item.prompt_id === updated.prompt_id ? updated : item)));
+      const [metrics, runsList] = await Promise.all([
+        api.runAgreement(selectedRunId),
+        api.listRuns(),
+      ]);
+      setAgreement(metrics);
+      setRuns(runsList);
+      setImportedAnalysis(null);
+      setOverrideStatus('Override saved.');
+      onDataChanged();
+    } catch (err) {
+      setOverrideStatus(err.message);
+    }
+  }
+
   function handleResultTableKeyDown(event) {
     if (!filtered.length) return;
 
@@ -306,6 +334,9 @@ export default function ResultsView({
               <span>Task: <strong>{formatTaskType(selectedRun.task_type)}</strong></span>
               <span>Completed: <strong>{selectedRun.completed_items}/{selectedRun.total_items}</strong></span>
               <span>Provider failed: <strong>{selectedRun.provider_failed}</strong></span>
+              <span>Disagreement: <strong>{selectedRun.disagreement}</strong></span>
+              <span>Abstention: <strong>{selectedRun.abstention}</strong></span>
+              <span>Ambiguous: <strong>{selectedRun.ambiguous}</strong></span>
               <span>Created: <strong>{selectedRun.created_at}</strong></span>
               <span>Completed at: <strong>{selectedRun.completed_at || 'n/a'}</strong></span>
               <span>Source: <strong>{selectedRun.source_filename || 'n/a'}</strong></span>
@@ -348,7 +379,7 @@ export default function ResultsView({
         {status && <div className="alert error">{status}</div>}
         <div className="table-wrap" tabIndex={0} onKeyDown={handleResultTableKeyDown}>
           <table className="results-table">
-            <thead><tr><th>Prompt ID</th><th>Final label</th><th>Source</th><th>Category</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Prompt ID</th><th>Final label</th><th>Source</th><th>Category</th><th>Status</th><th>Reason</th><th>Updated</th><th>Actions</th></tr></thead>
             <tbody>
               {filtered.map((item) => {
                 const review = item.human_reviews?.at(-1);
@@ -359,6 +390,7 @@ export default function ResultsView({
                     <td>{review ? 'human' : 'AI annotators'}</td>
                     <td>{review?.unsafe_category || item.adjudication?.unsafe_category || 'none'}</td>
                     <td>{review ? 'reviewed' : item.adjudication?.decision_type}</td>
+                    <td>{formatReason(item.review_reason_type)}</td>
                     <td>{item?.updated_at}</td>
                     <td className="row-actions">
                       <button
@@ -386,7 +418,21 @@ export default function ResultsView({
             <h2>{selected.prompt_id}</h2>
             <AnnotationContent annotation={selected} />
             <DecisionSummary annotation={selected} />
-            {effectiveLabel(selected) === 'needs_human_review' && <button type="button" onClick={onReview}>Set human label</button>}
+            {selected.review_reason_type !== 'none' && <p className="muted">Review reason: {formatReason(selected.review_reason_type)}</p>}
+            <div className="button-row inspector-actions">
+              {effectiveLabel(selected) === 'needs_human_review' && <button type="button" onClick={onReview}>Open review queue</button>}
+              <button type="button" className="secondary" onClick={() => setOverrideOpen((value) => !value)}>
+                {selected.human_reviews?.length ? 'Edit override' : 'Override label'}
+              </button>
+            </div>
+            {overrideOpen && (
+              <HumanLabelForm
+                annotation={selected}
+                submitLabel="Save override"
+                status={overrideStatus}
+                onSubmit={saveOverride}
+              />
+            )}
             <details className="model-details"><summary>Show model votes</summary><VoteDetails annotation={selected} /></details>
           </>
         ) : (
@@ -421,4 +467,8 @@ function formatRatio(count, total) {
 
 function formatTaskType(taskType) {
   return (taskType || '').replaceAll('_', ' ');
+}
+
+function formatReason(reasonType) {
+  return reasonType === 'none' ? 'none' : (reasonType || '').replaceAll('_', ' ');
 }

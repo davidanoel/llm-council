@@ -27,6 +27,7 @@ UnsafeCategory = Literal[
 ]
 DecisionType = Literal["auto_safe", "auto_unsafe", "human_review"]
 TaskType = Literal["prompt_classification", "response_classification", "mixed"]
+ReviewReasonType = Literal["none", "provider_failure", "disagreement", "abstention", "ambiguous"]
 
 
 class AnnotationRequest(BaseModel):
@@ -105,6 +106,14 @@ class HumanReview(BaseModel):
     reviewed_at: str
 
 
+class ReviewSuggestion(BaseModel):
+    """Human-review reason and optional suggested label."""
+
+    reason_type: ReviewReasonType
+    suggested_label: Optional[HumanLabel] = None
+    suggested_unsafe_category: UnsafeCategory = "none"
+
+
 class AnnotationResult(BaseModel):
     """Stored annotation case."""
 
@@ -117,6 +126,9 @@ class AnnotationResult(BaseModel):
     row_number: Optional[int] = None
     votes: List[ModelVote] = Field(default_factory=list)
     adjudication: Optional[CouncilDecision] = None
+    review_reason_type: ReviewReasonType = "none"
+    suggested_label: Optional[HumanLabel] = None
+    suggested_unsafe_category: UnsafeCategory = "none"
     human_reviews: List[HumanReview] = Field(default_factory=list)
     created_at: str
     updated_at: str
@@ -139,6 +151,9 @@ class RunSummary(BaseModel):
     auto_unsafe: int = 0
     human_review: int = 0
     provider_failed: int = 0
+    disagreement: int = 0
+    abstention: int = 0
+    ambiguous: int = 0
     created_at: str
     completed_at: Optional[str] = None
 
@@ -160,6 +175,7 @@ class ExportedLabel(BaseModel):
     label: Label
     label_source: Literal["council", "human"]
     decision_type: DecisionType
+    review_reason_type: ReviewReasonType = "none"
     confidence: Optional[float] = None
     unsafe_category: UnsafeCategory = "none"
     human_review_rationale: Optional[str] = None

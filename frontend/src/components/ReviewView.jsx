@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { AnnotationContent, Badge, DecisionSummary, VoteDetails } from './AnnotationDetails';
-import { UNSAFE_CATEGORIES } from './annotationUtils';
+import HumanLabelForm from './HumanLabelForm';
 
 export default function ReviewView({ refreshVersion, selectedRunId, onSaved }) {
   const [queue, setQueue] = useState([]);
+  const [run, setRun] = useState(null);
   const [index, setIndex] = useState(0);
-  const [label, setLabel] = useState('safe');
-  const [category, setCategory] = useState('other');
-  const [rationale, setRationale] = useState('');
-  const [reviewer, setReviewer] = useState('local-user');
+  const [reasonFilter, setReasonFilter] = useState('all');
   const [status, setStatus] = useState('');
   const current = queue[index];
 
@@ -25,45 +23,42 @@ export default function ReviewView({ refreshVersion, selectedRunId, onSaved }) {
       return;
     }
     try {
-      const items = await api.runReviewQueue(selectedRunId);
+      const [items, runSummary] = await Promise.all([
+        api.runReviewQueue(selectedRunId, reasonFilter),
+        api.getRun(selectedRunId),
+      ]);
       setQueue(items);
+      setRun(runSummary);
       setIndex(0);
     } catch (err) {
       setStatus(err.message);
     }
-  }, [selectedRunId]);
+  }, [selectedRunId, reasonFilter]);
 
   useEffect(() => {
     let active = true;
     if (!selectedRunId) {
       setQueue([]);
+      setRun(null);
       return () => { active = false; };
     }
-    api.runReviewQueue(selectedRunId)
-      .then((items) => {
+    Promise.all([api.runReviewQueue(selectedRunId, reasonFilter), api.getRun(selectedRunId)])
+      .then(([items, runSummary]) => {
         if (active) {
           setQueue(items);
+          setRun(runSummary);
           setIndex(0);
         }
       })
       .catch((err) => { if (active) setStatus(err.message); });
     return () => { active = false; };
-  }, [refreshVersion, selectedRunId]);
+  }, [refreshVersion, selectedRunId, reasonFilter]);
 
-  async function saveAndNext() {
+  async function saveAndNext(payload) {
     if (!current) return;
     setStatus('Saving review...');
     try {
-      await api.humanReview({
-        prompt_id: current.prompt_id,
-        run_id: current.run_id,
-        label,
-        unsafe_category: label === 'unsafe' ? category : 'none',
-        rationale,
-        reviewer,
-      });
-      setRationale('');
-      setCategory('other');
+      await api.humanReview(payload);
       await loadQueue();
       onSaved();
       setStatus('Review saved.');
@@ -72,36 +67,53 @@ export default function ReviewView({ refreshVersion, selectedRunId, onSaved }) {
     }
   }
 
+  async function acceptSuggestion() {
+    if (!current?.suggested_label) return;
+    await saveAndNext({
+      prompt_id: current.prompt_id,
+      run_id: current.run_id,
+      label: current.suggested_label,
+      unsafe_category: current.suggested_label === 'unsafe' ? current.suggested_unsafe_category : 'none',
+      rationale: `Accepted AI suggestion for ${formatReason(current.review_reason_type)}.`,
+      reviewer: 'local-user',
+    });
+  }
+
   if (!current) {
-    return <section className="panel empty-view"><h2>Review queue</h2><p>No prompts currently need human review.</p></section>;
+    return (
+      <section className="panel empty-view">
+        <h2>Review queue</h2>
+        <ReasonFilters active={reasonFilter} counts={run} onChange={setReasonFilter} />
+        <p>No prompts currently need human review.</p>
+      </section>
+    );
   }
 
   return (
     <section className="panel review-workspace">
       <div className="review-header">
-        <div><h2>Human review</h2><span>Item {index + 1} of {queue.length}</span></div>
+        <div>
+          <h2>Human review</h2>
+          <span>Item {index + 1} of {queue.length} · {formatReason(current.review_reason_type)}</span>
+        </div>
         <div className="button-row">
           <button type="button" className="secondary" disabled={index === 0} onClick={() => setIndex(index - 1)}>Previous</button>
           <button type="button" className="secondary" disabled={index >= queue.length - 1} onClick={() => setIndex(index + 1)}>Next</button>
         </div>
       </div>
 
+      <ReasonFilters active={reasonFilter} counts={run} onChange={setReasonFilter} />
+
       <AnnotationContent annotation={current} />
 
-      <div className="review-form">
-        <fieldset>
-          <legend>Set final label</legend>
-          <div className="segmented">
-            <button type="button" className={label === 'safe' ? 'selected safe-choice' : ''} onClick={() => setLabel('safe')}>Safe</button>
-            <button type="button" className={label === 'unsafe' ? 'selected unsafe-choice' : ''} onClick={() => setLabel('unsafe')}>Unsafe</button>
-          </div>
-        </fieldset>
-        {label === 'unsafe' && <label>Unsafe category<select value={category} onChange={(event) => setCategory(event.target.value)}>{UNSAFE_CATEGORIES.filter((item) => item !== 'none').map((item) => <option key={item}>{item}</option>)}</select></label>}
-        <label>Rationale<textarea rows={4} value={rationale} onChange={(event) => setRationale(event.target.value)} /></label>
-        <label>Reviewer<input value={reviewer} onChange={(event) => setReviewer(event.target.value)} /></label>
-        <button type="button" onClick={saveAndNext}>Save and next</button>
-        {status && <span className="muted">{status}</span>}
-      </div>
+      {current.suggested_label && (
+        <div className="suggestion-box">
+          <span>Suggestion: <strong>{current.suggested_label}</strong>{current.suggested_label === 'unsafe' ? ` · ${current.suggested_unsafe_category}` : ''}</span>
+          <button type="button" onClick={acceptSuggestion}>Accept {current.suggested_label}</button>
+        </div>
+      )}
+
+      <HumanLabelForm annotation={current} submitLabel="Save and next" status={status} onSubmit={saveAndNext} />
 
       <details className="model-details">
         <summary>Show AI suggestion and model votes</summary>
@@ -116,4 +128,27 @@ export default function ReviewView({ refreshVersion, selectedRunId, onSaved }) {
       </details>
     </section>
   );
+}
+
+function ReasonFilters({ active, counts, onChange }) {
+  const filters = [
+    ['all', 'All', counts?.human_review || 0],
+    ['provider_failure', 'Provider failures', counts?.provider_failed || 0],
+    ['disagreement', 'Disagreement', counts?.disagreement || 0],
+    ['abstention', 'Abstention', counts?.abstention || 0],
+    ['ambiguous', 'Ambiguous', counts?.ambiguous || 0],
+  ];
+  return (
+    <div className="filter-row compact-filters">
+      {filters.map(([value, label, count]) => (
+        <button key={value} type="button" className={active === value ? 'filter active' : 'filter'} onClick={() => onChange(value)}>
+          {label} ({count})
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function formatReason(reasonType) {
+  return (reasonType || 'ambiguous').replaceAll('_', ' ');
 }

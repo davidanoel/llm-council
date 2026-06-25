@@ -455,6 +455,10 @@ legend {
   margin-top: 18px;
 }
 
+.inspector-actions {
+  margin: 12px 0 4px;
+}
+
 .results-toolbar {
   margin-bottom: 14px;
 }
@@ -518,6 +522,10 @@ legend {
   margin-bottom: 12px;
 }
 
+.compact-filters {
+  margin: 12px 0;
+}
+
 .filter {
   padding: 6px 10px;
   background: white;
@@ -538,6 +546,18 @@ legend {
 
 .danger-button:hover {
   background: #fff1f2;
+}
+
+.suggestion-box {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 4px;
+  background: #eff6ff;
 }
 
 .table-wrap {

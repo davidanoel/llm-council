@@ -78,8 +78,17 @@ cd frontend && npm run dev
 ## UI Workflow
 
 1. **Annotate:** upload and validate a CSV, name the run, then explicitly start annotation.
-2. **Review:** resolve uncertain prompts for the selected run one at a time and save the human label.
-3. **Results:** select a run, view AI agreement, retry provider failures, inspect votes, and export JSON or CSV.
+2. **Review:** resolve uncertain prompts for the selected run one at a time, filtered by review reason.
+3. **Results:** select a run, view AI agreement, retry provider failures, inspect votes, override any final label when needed, and export JSON or CSV.
+
+Review reasons are computed from the model votes:
+
+- `provider_failure`
+- `disagreement`
+- `abstention`
+- `ambiguous`
+
+The review queue shows counts by reason and offers an accept-suggestion button when the vote pattern supports one.
 
 ## CSV Input
 
@@ -125,7 +134,7 @@ Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
 - `GET /api/runs/{run_id}/export-labels.csv`
 
 Exports use the latest human label when present.
-JSON exports include the complete structured model vote list, run id/name, task type, row number, decision type, and timestamps. CSV exports include the same run/item traceability and flatten the three votes into `vote_1_*`, `vote_2_*`, and `vote_3_*` columns for model name, label, confidence, unsafe category, parse error, and rationale.
+JSON exports include the complete structured model vote list, run id/name, task type, row number, decision type, review reason, and timestamps. CSV exports include the same run/item traceability and flatten the three votes into `vote_1_*`, `vote_2_*`, and `vote_3_*` columns for model name, label, confidence, unsafe category, parse error, and rationale.
 Use **Analyze CSV** in Results to recompute metrics from a previous labels export without storing or re-annotating it.
 
 ## Tests

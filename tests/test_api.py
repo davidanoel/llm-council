@@ -187,7 +187,7 @@ def test_csv_export_human_override_prompt_metadata_and_votes(client):
     assert response.headers["content-type"].startswith("text/csv")
     rows = list(csv.DictReader(StringIO(response.text)))
     assert rows
-    assert list(rows[0].keys())[:13] == [
+    assert list(rows[0].keys())[:14] == [
         "run_id",
         "run_name",
         "task_type",
@@ -198,6 +198,7 @@ def test_csv_export_human_override_prompt_metadata_and_votes(client):
         "label",
         "label_source",
         "decision_type",
+        "review_reason_type",
         "confidence",
         "unsafe_category",
         "human_review_rationale",
@@ -216,6 +217,7 @@ def test_csv_export_human_override_prompt_metadata_and_votes(client):
     assert rows[0]["label"] == "unsafe"
     assert rows[0]["label_source"] == "human"
     assert rows[0]["decision_type"] == "auto_safe"
+    assert rows[0]["review_reason_type"] == "none"
     assert rows[0]["confidence"] == ""
     assert rows[0]["unsafe_category"] == "phishing"
     assert rows[0]["human_review_rationale"] == "Override for test."
@@ -229,6 +231,31 @@ def test_csv_export_human_override_prompt_metadata_and_votes(client):
     assert analysis.status_code == 200
     assert analysis.json()["unsafe_items"] == 1
     assert analysis.json()["human_review_items"] == 1
+
+
+def test_human_can_override_auto_decision(client):
+    data = create_csv_run(client, "prompt_id,prompt\np1,How do I kill port 8080?\n")
+    run_id = data["run"]["run_id"]
+    item = client.get(f"/api/runs/{run_id}/items").json()[0]
+    assert item["adjudication"]["decision_type"] == "auto_safe"
+
+    reviewed = client.post(
+        "/api/human-review",
+        json={
+            "run_id": run_id,
+            "prompt_id": "p1",
+            "label": "unsafe",
+            "unsafe_category": "other",
+            "reviewer": "analyst",
+            "rationale": "Override allowed for dataset correction.",
+        },
+    )
+
+    assert reviewed.status_code == 200
+    assert reviewed.json()["human_reviews"][-1]["label"] == "unsafe"
+    exported = client.get(f"/api/runs/{run_id}/export-labels")
+    assert exported.json()[0]["label"] == "unsafe"
+    assert exported.json()[0]["label_source"] == "human"
 
 
 def test_run_can_be_renamed(client):
@@ -296,6 +323,15 @@ def test_provider_failure_counts_completed_human_review_and_provider_failed(tmp_
     assert progress["failed"] == 0
     assert progress["human_review"] == 1
     assert progress["provider_failed"] == 1
+
+    run_id = response.json()["run"]["run_id"]
+    run = client.get(f"/api/runs/{run_id}")
+    assert run.json()["provider_failed"] == 1
+    assert run.json()["disagreement"] == 0
+    queue = client.get(f"/api/runs/{run_id}/review-queue?reason_type=provider_failure")
+    assert queue.status_code == 200
+    assert len(queue.json()) == 1
+    assert queue.json()[0]["review_reason_type"] == "provider_failure"
 
 
 def test_retry_provider_failures_recomputes_decision(tmp_path, monkeypatch):
