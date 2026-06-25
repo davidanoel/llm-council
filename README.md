@@ -79,7 +79,7 @@ cd frontend && npm run dev
 
 1. **Annotate:** upload and validate a CSV, name the run, then explicitly start annotation.
 2. **Review:** resolve uncertain prompts for the selected run one at a time, filtered by review reason.
-3. **Results:** select a run, view AI agreement, resume failed rows, retry provider failures, inspect votes, override any final label when needed, preview export readiness, and export JSON, CSV, or a manifest.
+3. **Results:** select a run, check run health and label distribution, resume failed rows, retry provider failures, inspect votes, override any final label when needed, preview export readiness, and export JSON, CSV, or a manifest. Detailed agreement metrics are available in a collapsed section.
 
 Review reasons are computed from the model votes:
 

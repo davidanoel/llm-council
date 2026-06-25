@@ -274,6 +274,20 @@ textarea {
   font-size: 11px;
 }
 
+.metric-section {
+  margin-top: 14px;
+}
+
+.metric-section h3 {
+  margin: 0;
+  color: #334e68;
+  font-size: 14px;
+}
+
+.agreement-details {
+  margin-top: 14px;
+}
+
 .metric-source {
   display: flex;
   align-items: center;
@@ -289,6 +303,7 @@ textarea {
 }
 
 .advanced-panel summary,
+.agreement-details summary,
 .model-details summary {
   color: #24557a;
   font-weight: 700;
@@ -420,6 +435,10 @@ dd {
   max-width: 700px;
 }
 
+.review-workspace .review-form {
+  max-width: none;
+}
+
 fieldset {
   margin: 0;
   padding: 0;
@@ -460,6 +479,12 @@ legend {
   border-color: #92400e;
   color: #92400e;
   background: #fffbeb;
+}
+
+.review-workspace .segmented button {
+  min-width: 150px;
+  padding: 13px 20px;
+  font-size: 16px;
 }
 
 .model-details {

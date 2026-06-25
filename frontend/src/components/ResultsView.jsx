@@ -54,7 +54,8 @@ export default function ResultsView({
   const outcomeCounts = useMemo(() => ({
     safe: annotations.filter((item) => effectiveLabel(item) === 'safe').length,
     unsafe: annotations.filter((item) => effectiveLabel(item) === 'unsafe').length,
-    humanReview: annotations.filter((item) => item.adjudication?.decision_type === 'human_review').length,
+    unresolved: annotations.filter((item) => effectiveLabel(item) === 'needs_human_review').length,
+    humanReviewed: annotations.filter((item) => item.human_reviews?.length).length,
     failed: annotations.filter((item) => effectiveLabel(item) === 'failed').length,
   }), [annotations]);
   const selected = annotations.find((item) => item.prompt_id === selectedId);
@@ -63,7 +64,8 @@ export default function ResultsView({
   const displayedCounts = importedAnalysis ? {
     safe: importedAnalysis.safe_items,
     unsafe: importedAnalysis.unsafe_items,
-    humanReview: importedAnalysis.human_review_items,
+    unresolved: importedAnalysis.unresolved_items,
+    humanReviewed: importedAnalysis.human_review_items,
     failed: 0,
   } : outcomeCounts;
 
@@ -421,24 +423,40 @@ export default function ResultsView({
           <div className="metric-source">Metrics from <strong>{importedAnalysis.fileName}</strong><button type="button" className="filter" onClick={() => setImportedAnalysis(null)}>Use current data</button></div>
         )}
         {exportPreview && !importedAnalysis && (
-          <div className="metrics-grid export-preview">
-            <div><span>Exportable rows</span><strong>{formatRatio(exportPreview.exportable_items, exportPreview.total_items)}</strong></div>
-            <div><span>Failed/unexportable</span><strong>{formatRatio(exportPreview.failed_items, exportPreview.total_items)}</strong></div>
-            <div><span>Human overrides</span><strong>{formatRatio(exportPreview.human_reviewed_items, exportPreview.total_items)}</strong></div>
-            <div><span>Unresolved review</span><strong>{formatRatio(exportPreview.unresolved_items, exportPreview.total_items)}</strong></div>
+          <div className="metric-section">
+            <h3>Run health</h3>
+            <div className="metrics-grid">
+              <div><span>Total rows</span><strong>{exportPreview.total_items}</strong></div>
+              <div><span>AI labeled</span><strong>{formatRatio(exportPreview.ai_labeled_items, exportPreview.total_items)}</strong></div>
+              <div><span>Needs review</span><strong>{formatRatio(exportPreview.unresolved_items, exportPreview.total_items)}</strong></div>
+              <div><span>Human reviewed</span><strong>{formatRatio(exportPreview.human_reviewed_items, exportPreview.total_items)}</strong></div>
+              <div><span>Failed</span><strong>{formatRatio(exportPreview.failed_items, exportPreview.total_items)}</strong></div>
+              <div><span>Exportable</span><strong>{formatRatio(exportPreview.exportable_items, exportPreview.total_items)}</strong></div>
+            </div>
+          </div>
+        )}
+        {displayedTotal > 0 && (
+          <div className="metric-section">
+            <h3>Label distribution</h3>
+            <div className="metrics-grid">
+            <div><span>Final safe rate</span><strong>{formatRatio(displayedCounts.safe, displayedTotal)}</strong></div>
+            <div><span>Final unsafe rate</span><strong>{formatRatio(displayedCounts.unsafe, displayedTotal)}</strong></div>
+              <div><span>Unresolved review</span><strong>{formatRatio(displayedCounts.unresolved, displayedTotal)}</strong></div>
+              <div><span>Human reviewed</span><strong>{formatRatio(displayedCounts.humanReviewed, displayedTotal)}</strong></div>
+            <div><span>Failed rows</span><strong>{formatRatio(displayedCounts.failed, displayedTotal)}</strong></div>
+          </div>
           </div>
         )}
         {displayedAgreement && (
-          <div className="metrics-grid agreement-summary">
-            <div><span>Fleiss kappa</span><strong>{displayedAgreement.fleiss_kappa ?? 'N/A'}</strong><small>3-model chance-corrected</small></div>
-            <div><span>Pairwise agreement</span><strong>{formatPercent(displayedAgreement.observed_agreement)}</strong><small>Average model-pair agreement</small></div>
-            <div><span>All 3 matched</span><strong>{formatPercent(displayedAgreement.unanimous_rate)}</strong><small>Complete panels only</small></div>
-            <div><span>Complete vote panels</span><strong>{formatRatio(displayedAgreement.complete_items, displayedTotal)}</strong><small>All 3 votes succeeded</small></div>
-            <div><span>Final safe rate</span><strong>{formatRatio(displayedCounts.safe, displayedTotal)}</strong></div>
-            <div><span>Final unsafe rate</span><strong>{formatRatio(displayedCounts.unsafe, displayedTotal)}</strong></div>
-            <div><span>Human-review rate</span><strong>{formatRatio(displayedCounts.humanReview, displayedTotal)}</strong></div>
-            <div><span>Failed rows</span><strong>{formatRatio(displayedCounts.failed, displayedTotal)}</strong></div>
-          </div>
+          <details className="agreement-details">
+            <summary>Agreement details</summary>
+            <div className="metrics-grid agreement-summary">
+              <div><span>Pairwise agreement</span><strong>{formatPercent(displayedAgreement.observed_agreement)}</strong><small>Average model-pair agreement</small></div>
+              <div><span>All 3 matched</span><strong>{formatPercent(displayedAgreement.unanimous_rate)}</strong><small>Complete panels only</small></div>
+              <div><span>Complete vote panels</span><strong>{formatRatio(displayedAgreement.complete_items, displayedTotal)}</strong><small>All 3 votes succeeded</small></div>
+              <div><span>Fleiss kappa</span><strong>{displayedAgreement.fleiss_kappa ?? 'N/A'}</strong><small>Chance-corrected; unstable when labels are imbalanced</small></div>
+            </div>
+          </details>
         )}
         <div className="filter-row">
           {['all', 'safe', 'unsafe', 'needs_human_review', 'failed'].map((value) => (
