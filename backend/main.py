@@ -35,9 +35,14 @@ from .schemas import (
     ExportPreview,
     ExportedLabel,
     HumanReviewRequest,
+    ItemSort,
+    LabelSource,
+    PaginatedAnnotations,
     ReviewReasonType,
+    ResultLabelFilter,
     RunSummary,
     RunUpdate,
+    SortDirection,
     utc_now,
 )
 
@@ -283,6 +288,36 @@ async def list_run_items(run_id: str) -> List[AnnotationResult]:
     if not storage.load_run(run_id):
         raise HTTPException(status_code=404, detail="Run not found")
     return storage.list_annotations(run_id=run_id)
+
+
+@app.get("/api/runs/{run_id}/items-page", response_model=PaginatedAnnotations)
+async def list_run_items_page(
+    run_id: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=500),
+    label: ResultLabelFilter | None = Query(default=None),
+    review_reason: ReviewReasonType | None = Query(default=None),
+    label_source: LabelSource = Query(default="all"),
+    search: str = Query(default=""),
+    sort: ItemSort = Query(default="row_number"),
+    direction: SortDirection = Query(default="asc"),
+) -> PaginatedAnnotations:
+    """List annotations in one run with server-side browsing controls."""
+
+    try:
+        return storage.list_annotations_page(
+            run_id=run_id,
+            page=page,
+            page_size=page_size,
+            label=label,
+            review_reason=review_reason,
+            label_source=label_source,
+            search=search,
+            sort=sort,
+            direction=direction,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Run not found") from None
 
 
 @app.post("/api/runs/{run_id}/retry-provider-failures", response_model=BatchAnnotationResponse)

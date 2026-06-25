@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { AnnotationContent, Badge, DecisionSummary, VoteDetails } from './AnnotationDetails';
 import HumanLabelForm from './HumanLabelForm';
@@ -13,7 +13,13 @@ export default function ResultsView({
 }) {
   const [runs, setRuns] = useState([]);
   const [annotations, setAnnotations] = useState([]);
+  const [pageInfo, setPageInfo] = useState({ total: 0, page: 1, page_size: 100, total_pages: 0 });
   const [filter, setFilter] = useState('all');
+  const [reviewReason, setReviewReason] = useState('all');
+  const [labelSource, setLabelSource] = useState('all');
+  const [sort, setSort] = useState('row_number');
+  const [direction, setDirection] = useState('asc');
+  const [pageSize, setPageSize] = useState(100);
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedId, setSelectedId] = useState(null);
@@ -30,44 +36,22 @@ export default function ResultsView({
   const [overrideStatus, setOverrideStatus] = useState('');
 
   const selectedRun = runs.find((run) => run.run_id === selectedRunId);
-  const filtered = useMemo(() => annotations.filter((item) => {
-    const filterMatch = filter === 'all' || effectiveLabel(item) === filter;
-    if (!filterMatch) return false;
-    if (!searchQuery) return true;
-
-    const review = item.human_reviews?.at(-1);
-    const searchText = [
-      item.prompt_id,
-      item.prompt_text,
-      item.response_text,
-      item.error_message,
-      item.adjudication?.unsafe_category,
-      item.adjudication?.decision_type,
-      item.review_reason_type,
-      review?.unsafe_category,
-      effectiveLabel(item),
-      displayLabel(effectiveLabel(item)),
-    ].filter(Boolean).join(' ').toLowerCase();
-
-    return searchText.includes(searchQuery);
-  }), [annotations, filter, searchQuery]);
-  const outcomeCounts = useMemo(() => ({
-    safe: annotations.filter((item) => effectiveLabel(item) === 'safe').length,
-    unsafe: annotations.filter((item) => effectiveLabel(item) === 'unsafe').length,
-    unresolved: annotations.filter((item) => effectiveLabel(item) === 'needs_human_review').length,
-    humanReviewed: annotations.filter((item) => item.human_reviews?.length).length,
-    failed: annotations.filter((item) => effectiveLabel(item) === 'failed').length,
-  }), [annotations]);
   const selected = annotations.find((item) => item.prompt_id === selectedId);
   const displayedAgreement = importedAnalysis?.agreement || agreement;
-  const displayedTotal = importedAnalysis?.total_items ?? annotations.length;
+  const displayedTotal = importedAnalysis?.total_items ?? exportPreview?.total_items ?? 0;
   const displayedCounts = importedAnalysis ? {
     safe: importedAnalysis.safe_items,
     unsafe: importedAnalysis.unsafe_items,
     unresolved: importedAnalysis.unresolved_items,
     humanReviewed: importedAnalysis.human_review_items,
     failed: 0,
-  } : outcomeCounts;
+  } : {
+    safe: exportPreview?.safe_items || 0,
+    unsafe: exportPreview?.unsafe_items || 0,
+    unresolved: exportPreview?.unresolved_items || 0,
+    humanReviewed: exportPreview?.human_reviewed_items || 0,
+    failed: exportPreview?.failed_items || 0,
+  };
 
   useEffect(() => {
     let active = true;
@@ -87,24 +71,48 @@ export default function ResultsView({
     let active = true;
     if (!selectedRunId) {
       setAnnotations([]);
+      setPageInfo({ total: 0, page: 1, page_size: pageSize, total_pages: 0 });
       setAgreement(null);
       setExportPreview(null);
       setSelectedId(null);
       return () => { active = false; };
     }
 
-    Promise.all([api.runItems(selectedRunId), api.runAgreement(selectedRunId), api.exportPreview(selectedRunId)])
-      .then(([items, metrics, preview]) => {
+    Promise.all([
+      api.runItemsPage(selectedRunId, {
+        page: pageInfo.page,
+        page_size: pageSize,
+        label: filter,
+        review_reason: reviewReason,
+        label_source: labelSource,
+        search: searchQuery,
+        sort,
+        direction,
+      }),
+      api.runAgreement(selectedRunId),
+      api.exportPreview(selectedRunId),
+    ])
+      .then(([pageData, metrics, preview]) => {
         if (active) {
-          setAnnotations(items);
+          setAnnotations(pageData.items);
+          setPageInfo({
+            total: pageData.total,
+            page: pageData.page,
+            page_size: pageData.page_size,
+            total_pages: pageData.total_pages,
+          });
           setAgreement(metrics);
           setExportPreview(preview);
-          setSelectedId((current) => current || items[0]?.prompt_id || null);
+          setSelectedId((current) => (
+            pageData.items.some((item) => item.prompt_id === current)
+              ? current
+              : pageData.items[0]?.prompt_id || null
+          ));
         }
       })
       .catch((err) => { if (active) setStatus(err.message); });
     return () => { active = false; };
-  }, [refreshVersion, selectedRunId]);
+  }, [refreshVersion, selectedRunId, pageInfo.page, pageSize, filter, reviewReason, labelSource, searchQuery, sort, direction]);
 
   useEffect(() => {
     setRunNameDraft(selectedRun?.name || '');
@@ -119,15 +127,8 @@ export default function ResultsView({
   }, [searchInput]);
 
   useEffect(() => {
-    if (!filtered.length) {
-      setSelectedId(null);
-      return;
-    }
-
-    if (!filtered.some((item) => item.prompt_id === selectedId)) {
-      setSelectedId(filtered[0].prompt_id);
-    }
-  }, [filtered, selectedId]);
+    setPageInfo((current) => ({ ...current, page: 1 }));
+  }, [filter, reviewReason, labelSource, searchQuery, sort, direction, pageSize]);
 
   useEffect(() => {
     setOverrideOpen(false);
@@ -167,6 +168,40 @@ export default function ResultsView({
     }
   }
 
+  async function refreshCurrentPage(includeRuns = false) {
+    const requests = [
+      api.runItemsPage(selectedRunId, {
+        page: pageInfo.page,
+        page_size: pageSize,
+        label: filter,
+        review_reason: reviewReason,
+        label_source: labelSource,
+        search: searchQuery,
+        sort,
+        direction,
+      }),
+      api.runAgreement(selectedRunId),
+      api.exportPreview(selectedRunId),
+    ];
+    if (includeRuns) requests.push(api.listRuns());
+    const [pageData, metrics, preview, runsList] = await Promise.all(requests);
+    setAnnotations(pageData.items);
+    setPageInfo({
+      total: pageData.total,
+      page: pageData.page,
+      page_size: pageData.page_size,
+      total_pages: pageData.total_pages,
+    });
+    setSelectedId((current) => (
+      pageData.items.some((item) => item.prompt_id === current)
+        ? current
+        : pageData.items[0]?.prompt_id || null
+    ));
+    setAgreement(metrics);
+    setExportPreview(preview);
+    if (runsList) setRuns(runsList);
+  }
+
   async function analyzeCsv(event) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -202,16 +237,7 @@ export default function ResultsView({
     try {
       setRetrying(true);
       const response = await api.retryProviderFailures(selectedRunId);
-      const [items, metrics, preview, runsList] = await Promise.all([
-        api.runItems(selectedRunId),
-        api.runAgreement(selectedRunId),
-        api.exportPreview(selectedRunId),
-        api.listRuns(),
-      ]);
-      setAnnotations(items);
-      setAgreement(metrics);
-      setExportPreview(preview);
-      setRuns(runsList);
+      await refreshCurrentPage(true);
       setImportedAnalysis(null);
       setStatus(`Retried ${response.progress.completed} items; ${response.progress.failed} failed.`);
       onDataChanged();
@@ -227,16 +253,7 @@ export default function ResultsView({
     try {
       setResuming(true);
       const response = await api.resumeRun(selectedRunId);
-      const [items, metrics, preview, runsList] = await Promise.all([
-        api.runItems(selectedRunId),
-        api.runAgreement(selectedRunId),
-        api.exportPreview(selectedRunId),
-        api.listRuns(),
-      ]);
-      setAnnotations(items);
-      setAgreement(metrics);
-      setExportPreview(preview);
-      setRuns(runsList);
+      await refreshCurrentPage(true);
       setImportedAnalysis(null);
       setStatus(`Resumed ${response.progress.completed} rows; ${response.progress.failed} failed.`);
       onDataChanged();
@@ -283,10 +300,7 @@ export default function ResultsView({
         return next[0]?.prompt_id || null;
       });
       setImportedAnalysis(null);
-      const metrics = selectedRunId ? await api.runAgreement(selectedRunId) : null;
-      const preview = selectedRunId ? await api.exportPreview(selectedRunId) : null;
-      setAgreement(metrics);
-      setExportPreview(preview);
+      await refreshCurrentPage(false);
       setStatus(`Deleted ${item.prompt_id}.`);
       onDataChanged();
     } catch (err) {
@@ -301,14 +315,7 @@ export default function ResultsView({
       setOverrideStatus('Saving override...');
       const updated = await api.humanReview(payload);
       setAnnotations((current) => current.map((item) => (item.prompt_id === updated.prompt_id ? updated : item)));
-      const [metrics, preview, runsList] = await Promise.all([
-        api.runAgreement(selectedRunId),
-        api.exportPreview(selectedRunId),
-        api.listRuns(),
-      ]);
-      setAgreement(metrics);
-      setExportPreview(preview);
-      setRuns(runsList);
+      await refreshCurrentPage(true);
       setImportedAnalysis(null);
       setOverrideStatus('Override saved.');
       onDataChanged();
@@ -318,21 +325,21 @@ export default function ResultsView({
   }
 
   function handleResultTableKeyDown(event) {
-    if (!filtered.length) return;
+    if (!annotations.length) return;
 
-    const currentIndex = Math.max(0, filtered.findIndex((item) => item.prompt_id === selectedId));
+    const currentIndex = Math.max(0, annotations.findIndex((item) => item.prompt_id === selectedId));
 
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      const nextIndex = Math.min(filtered.length - 1, currentIndex + 1);
-      setSelectedId(filtered[nextIndex].prompt_id);
+      const nextIndex = Math.min(annotations.length - 1, currentIndex + 1);
+      setSelectedId(annotations[nextIndex].prompt_id);
       return;
     }
 
     if (event.key === 'ArrowUp') {
       event.preventDefault();
       const nextIndex = Math.max(0, currentIndex - 1);
-      setSelectedId(filtered[nextIndex].prompt_id);
+      setSelectedId(annotations[nextIndex].prompt_id);
     }
   }
 
@@ -342,25 +349,25 @@ export default function ResultsView({
         <div className="results-toolbar">
           <div>
             <h2>Annotation results</h2>
-            <p className="muted">{selectedRun ? selectedRun.name : 'Select a run'} · {filtered.length} of {annotations.length} items</p>
+            <p className="muted">{selectedRun ? selectedRun.name : 'Select a run'} · {annotations.length} shown of {pageInfo.total} matching rows</p>
           </div>
           <div className="button-row">
-            {annotations.some((item) => effectiveLabel(item) === 'needs_human_review') && <button type="button" onClick={onReview}>Review unresolved</button>}
-            <button type="button" className="secondary" disabled={!selectedRunId} onClick={downloadJson}>Export JSON</button>
-            <button type="button" className="secondary" disabled={!selectedRunId} onClick={downloadCsv}>Export CSV</button>
-            <button type="button" className="secondary" disabled={!selectedRunId} onClick={downloadManifest}>Export manifest</button>
-            <label className="upload-button">Analyze CSV<input type="file" accept=".csv,text/csv" onChange={analyzeCsv} /></label>
+            {exportPreview?.unresolved_items > 0 && <button type="button" title="Review unresolved" aria-label="Review unresolved" onClick={onReview}>Review</button>}
+            <button type="button" className="secondary compact-button" title="Export JSON" disabled={!selectedRunId} onClick={downloadJson}>JSON</button>
+            <button type="button" className="secondary compact-button" title="Export CSV" disabled={!selectedRunId} onClick={downloadCsv}>CSV</button>
+            <button type="button" className="secondary compact-button" title="Export manifest" disabled={!selectedRunId} onClick={downloadManifest}>Manifest</button>
+            <label className="upload-button compact-button" title="Analyze exported CSV">Analyze<input type="file" accept=".csv,text/csv" onChange={analyzeCsv} /></label>
             {selectedRun?.provider_failed > 0 && (
-              <button type="button" className="secondary" disabled={retrying} onClick={retryProviderFailures}>
-                {retrying ? 'Retrying...' : 'Retry provider failures'}
+              <button type="button" className="secondary compact-button" title="Retry provider failures" disabled={retrying} onClick={retryProviderFailures}>
+                {retrying ? '...' : 'Retry'}
               </button>
             )}
             {selectedRun?.resumable_items > 0 && (
-              <button type="button" className="secondary" disabled={resuming} onClick={resumeRun}>
-                {resuming ? 'Resuming...' : 'Resume run'}
+              <button type="button" className="secondary compact-button" title="Resume failed rows" disabled={resuming} onClick={resumeRun}>
+                {resuming ? '...' : 'Resume'}
               </button>
             )}
-            <button type="button" className="secondary danger-button" disabled={!selectedRunId} onClick={deleteSelectedRun}>Delete run</button>
+            <button type="button" className="secondary danger-button compact-button" title="Delete run" disabled={!selectedRunId} onClick={deleteSelectedRun}>Delete</button>
           </div>
         </div>
 
@@ -467,17 +474,44 @@ export default function ResultsView({
             )}
           </details>
         )}
-        <div className="filter-row">
+        <div className="filter-row result-browser-controls">
           {['all', 'safe', 'unsafe', 'needs_human_review', 'failed'].map((value) => (
             <button key={value} type="button" className={filter === value ? 'filter active' : 'filter'} onClick={() => setFilter(value)}>{value === 'all' ? 'All' : displayLabel(value)}</button>
           ))}
+          <select aria-label="Review reason" value={reviewReason} onChange={(event) => setReviewReason(event.target.value)}>
+            <option value="all">Any reason</option>
+            <option value="provider_failure">Provider failure</option>
+            <option value="disagreement">Disagreement</option>
+            <option value="abstention">Abstention</option>
+            <option value="ambiguous">Ambiguous</option>
+          </select>
+          <select aria-label="Label source" value={labelSource} onChange={(event) => setLabelSource(event.target.value)}>
+            <option value="all">Any source</option>
+            <option value="ai">AI</option>
+            <option value="human">Human</option>
+          </select>
+          <select aria-label="Sort" value={sort} onChange={(event) => setSort(event.target.value)}>
+            <option value="row_number">Row order</option>
+            <option value="prompt_id">Prompt ID</option>
+            <option value="updated_at">Updated</option>
+            <option value="effective_label">Label</option>
+          </select>
+          <button
+            type="button"
+            className="filter"
+            title={`Sort ${direction === 'asc' ? 'ascending' : 'descending'}`}
+            aria-label={`Sort ${direction === 'asc' ? 'ascending' : 'descending'}`}
+            onClick={() => setDirection((value) => (value === 'asc' ? 'desc' : 'asc'))}
+          >
+            {direction === 'asc' ? 'Asc' : 'Desc'}
+          </button>
         </div>
         {status && <div className="alert error">{status}</div>}
         <div className="table-wrap" tabIndex={0} onKeyDown={handleResultTableKeyDown}>
           <table className="results-table">
             <thead><tr><th>Prompt ID</th><th>Final label</th><th>Source</th><th>Category</th><th>Status</th><th>Reason</th><th>Updated</th><th>Actions</th></tr></thead>
             <tbody>
-              {filtered.map((item) => {
+              {annotations.map((item) => {
                 const review = item.human_reviews?.at(-1);
                 return (
                   <tr key={item.prompt_id} className={selectedId === item.prompt_id ? 'selected-row' : ''} onClick={() => setSelectedId(item.prompt_id)}>
@@ -498,7 +532,7 @@ export default function ResultsView({
                           deletePrompt(item);
                         }}
                       >
-                        {deletingId === item.prompt_id ? 'Deleting...' : 'Delete'}
+                        {deletingId === item.prompt_id ? '...' : 'Del'}
                       </button>
                     </td>
                   </tr>
@@ -506,6 +540,37 @@ export default function ResultsView({
               })}
             </tbody>
           </table>
+        </div>
+        <div className="pagination-row">
+          <span>
+            Page <strong>{pageInfo.total_pages ? pageInfo.page : 0}</strong> of <strong>{pageInfo.total_pages}</strong>
+          </span>
+          <label>
+            Rows
+            <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))}>
+              {[50, 100, 250].map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </label>
+          <div className="button-row">
+            <button
+              type="button"
+              className="secondary compact-button"
+              title="Previous page"
+              disabled={pageInfo.page <= 1}
+              onClick={() => setPageInfo((current) => ({ ...current, page: Math.max(1, current.page - 1) }))}
+            >
+              Prev
+            </button>
+            <button
+              type="button"
+              className="secondary compact-button"
+              title="Next page"
+              disabled={!pageInfo.total_pages || pageInfo.page >= pageInfo.total_pages}
+              onClick={() => setPageInfo((current) => ({ ...current, page: Math.min(current.total_pages, current.page + 1) }))}
+            >
+              Next
+            </button>
+          </div>
         </div>
       </section>
       <section className="panel result-inspector sticky-inspector">

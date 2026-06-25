@@ -79,7 +79,7 @@ cd frontend && npm run dev
 
 1. **Annotate:** upload and validate a CSV, name the run, then explicitly start annotation.
 2. **Review:** resolve uncertain prompts for the selected run one at a time, filtered by review reason.
-3. **Results:** select a run, check run health and label distribution, resume failed rows, retry provider failures, inspect votes, override any final label when needed, preview export readiness, and export JSON, CSV, or a manifest. Detailed agreement metrics are available in a collapsed section.
+3. **Results:** select a run, check run health and label distribution, browse paged/filterable results, resume failed rows, retry provider failures, inspect votes, override any final label when needed, preview export readiness, and export JSON, CSV, or a manifest. Detailed agreement metrics are available in a collapsed section.
 4. **QA:** review export readiness and compare two runs across label distribution, failures, provider failures, human overrides, and agreement metrics.
 
 Review reasons are computed from the model votes:
@@ -126,6 +126,7 @@ Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
 - `GET /api/runs/{run_id}`
 - `PATCH /api/runs/{run_id}`
 - `GET /api/runs/{run_id}/items`
+- `GET /api/runs/{run_id}/items-page`
 - `POST /api/runs/{run_id}/resume`
 - `POST /api/runs/{run_id}/retry-provider-failures`
 - `GET /api/runs/{run_id}/agreement`

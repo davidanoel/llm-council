@@ -61,6 +61,17 @@ export const api = {
     return request(`/api/runs/${encodeURIComponent(runId)}/items`);
   },
 
+  runItemsPage(runId, params = {}) {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '' && value !== 'all') {
+        query.set(key, value);
+      }
+    });
+    const suffix = query.toString() ? `?${query}` : '';
+    return request(`/api/runs/${encodeURIComponent(runId)}/items-page${suffix}`);
+  },
+
   retryProviderFailures(runId) {
     return request(`/api/runs/${encodeURIComponent(runId)}/retry-provider-failures`, {
       method: 'POST',

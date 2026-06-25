@@ -18,8 +18,14 @@ from .schemas import (
     ExportedLabel,
     HumanReview,
     HumanReviewRequest,
+    LabelSource,
     ModelVote,
+    PaginatedAnnotations,
+    ReviewReasonType,
+    ResultLabelFilter,
     RunSummary,
+    SortDirection,
+    ItemSort,
     utc_now,
 )
 from .review_reason import classify_review_reason, vote_failed
@@ -460,6 +466,119 @@ def list_annotations(run_id: str) -> List[AnnotationResult]:
         return [build_annotation(connection, row["item_id"]) for row in rows]
 
 
+def list_annotations_page(
+    run_id: str,
+    page: int = 1,
+    page_size: int = 100,
+    label: Optional[ResultLabelFilter] = None,
+    review_reason: Optional[ReviewReasonType] = None,
+    label_source: LabelSource = "all",
+    search: str = "",
+    sort: ItemSort = "row_number",
+    direction: SortDirection = "asc",
+) -> PaginatedAnnotations:
+    """List a filtered, sorted, paged slice of annotation results."""
+
+    if load_run(run_id) is None:
+        raise KeyError(f"Run {run_id} not found")
+
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 500)
+    search_text = search.strip().lower()
+    annotations = list_annotations(run_id)
+
+    filtered = [
+        annotation
+        for annotation in annotations
+        if annotation_matches(
+            annotation,
+            label=label,
+            review_reason=review_reason,
+            label_source=label_source,
+            search_text=search_text,
+        )
+    ]
+    reverse = direction == "desc"
+    filtered.sort(key=lambda item: annotation_sort_key(item, sort), reverse=reverse)
+
+    total = len(filtered)
+    total_pages = (total + page_size - 1) // page_size if total else 0
+    if total_pages:
+        page = min(page, total_pages)
+    start = (page - 1) * page_size
+    end = start + page_size
+    return PaginatedAnnotations(
+        items=filtered[start:end],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
+
+
+def annotation_matches(
+    annotation: AnnotationResult,
+    label: Optional[ResultLabelFilter],
+    review_reason: Optional[ReviewReasonType],
+    label_source: LabelSource,
+    search_text: str,
+) -> bool:
+    """Return whether one annotation matches result browser filters."""
+
+    if label and filter_label(annotation) != label:
+        return False
+    if review_reason and review_reason != "none" and annotation.review_reason_type != review_reason:
+        return False
+    if label_source == "human" and not annotation.human_reviews:
+        return False
+    if label_source == "ai" and (annotation.human_reviews or not annotation.adjudication):
+        return False
+    if search_text:
+        searchable = " ".join(
+            value
+            for value in [
+                annotation.prompt_id,
+                annotation.prompt_text,
+                annotation.response_text or "",
+                annotation.error_message or "",
+            ]
+            if value
+        ).lower()
+        if search_text not in searchable:
+            return False
+    return True
+
+
+def annotation_sort_key(annotation: AnnotationResult, sort: ItemSort) -> tuple:
+    """Return a stable sort key for result browsing."""
+
+    if sort == "prompt_id":
+        return (annotation.prompt_id or "", annotation.row_number or 0)
+    if sort == "updated_at":
+        return (annotation.updated_at or "", annotation.row_number or 0)
+    if sort == "effective_label":
+        return (effective_label(annotation) or "", annotation.row_number or 0)
+    return (annotation.row_number is None, annotation.row_number or 0, annotation.created_at)
+
+
+def filter_label(annotation: AnnotationResult) -> str:
+    """Return label value used by result browser filters."""
+
+    if annotation.error_message and annotation.adjudication is None and not annotation.human_reviews:
+        return "failed"
+    return effective_label(annotation) or "failed"
+
+
+def effective_label(annotation: AnnotationResult) -> Optional[str]:
+    """Return the latest effective label for filtering and summary counts."""
+
+    if annotation.human_reviews:
+        return annotation.human_reviews[-1].label
+    if annotation.adjudication:
+        return annotation.adjudication.final_label
+    return None
+
+
 def list_retryable_annotations(run_id: str) -> List[AnnotationResult]:
     """List non-reviewed items that have one or more provider/parse failures."""
 
@@ -695,6 +814,8 @@ def export_preview(run_id: str) -> ExportPreview:
     annotations = list_annotations(run_id=run_id)
     exported = export_labels(include_prompt_text=False, run_id=run_id)
     human_reviewed = sum(bool(annotation.human_reviews) for annotation in annotations)
+    safe_items = sum(effective_label(annotation) == "safe" for annotation in annotations)
+    unsafe_items = sum(effective_label(annotation) == "unsafe" for annotation in annotations)
     unresolved = sum(
         not annotation.human_reviews
         and annotation.adjudication is not None
@@ -716,6 +837,8 @@ def export_preview(run_id: str) -> ExportPreview:
         unresolved_items=unresolved,
         human_reviewed_items=human_reviewed,
         ai_labeled_items=max(0, len(exported) - human_reviewed),
+        safe_items=safe_items,
+        unsafe_items=unsafe_items,
     )
 
 

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 
 Label = Literal["safe", "unsafe", "needs_human_review"]
+ResultLabelFilter = Literal["safe", "unsafe", "needs_human_review", "failed"]
 HumanLabel = Literal["safe", "unsafe"]
 UnsafeCategory = Literal[
     "malware",
@@ -28,6 +29,9 @@ UnsafeCategory = Literal[
 DecisionType = Literal["auto_safe", "auto_unsafe", "human_review"]
 TaskType = Literal["prompt_classification", "response_classification", "mixed"]
 ReviewReasonType = Literal["none", "provider_failure", "disagreement", "abstention", "ambiguous"]
+LabelSource = Literal["all", "ai", "human"]
+SortDirection = Literal["asc", "desc"]
+ItemSort = Literal["row_number", "prompt_id", "updated_at", "effective_label"]
 
 
 class AnnotationRequest(BaseModel):
@@ -135,6 +139,16 @@ class AnnotationResult(BaseModel):
     updated_at: str
 
 
+class PaginatedAnnotations(BaseModel):
+    """One paged slice of annotation results."""
+
+    items: List[AnnotationResult]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
 class RunSummary(BaseModel):
     """Stored annotation run summary."""
 
@@ -202,6 +216,8 @@ class ExportPreview(BaseModel):
     unresolved_items: int
     human_reviewed_items: int
     ai_labeled_items: int
+    safe_items: int = 0
+    unsafe_items: int = 0
 
 
 class ExportManifest(BaseModel):

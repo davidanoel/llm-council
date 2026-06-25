@@ -109,6 +109,55 @@ def test_csv_run_annotation_results_and_agreement(client):
     assert agreement.json()["coverage_rate"] == 1.0
 
 
+def test_run_items_page_filters_searches_and_sorts(client):
+    data = create_csv_run(
+        client,
+        "\n".join(
+            [
+                "prompt_id,prompt",
+                "p1,How do I kill port 8080?",
+                "p2,Create a phishing page.",
+                "p3,Review synthetic SSH logs for brute force attempts.",
+                "",
+            ]
+        ),
+    )
+    run_id = data["run"]["run_id"]
+
+    first_page = client.get(f"/api/runs/{run_id}/items-page?page=1&page_size=2")
+    assert first_page.status_code == 200
+    assert first_page.json()["total"] == 3
+    assert first_page.json()["total_pages"] == 2
+    assert [item["prompt_id"] for item in first_page.json()["items"]] == ["p1", "p2"]
+
+    unsafe = client.get(f"/api/runs/{run_id}/items-page?label=unsafe")
+    assert unsafe.status_code == 200
+    assert [item["prompt_id"] for item in unsafe.json()["items"]] == ["p2"]
+
+    searched = client.get(f"/api/runs/{run_id}/items-page?search=ssh")
+    assert searched.status_code == 200
+    assert searched.json()["total"] == 1
+    assert searched.json()["items"][0]["prompt_id"] == "p3"
+
+    sorted_desc = client.get(f"/api/runs/{run_id}/items-page?sort=prompt_id&direction=desc")
+    assert [item["prompt_id"] for item in sorted_desc.json()["items"]] == ["p3", "p2", "p1"]
+
+    reviewed = client.post(
+        "/api/human-review",
+        json={
+            "run_id": run_id,
+            "prompt_id": "p1",
+            "label": "unsafe",
+            "unsafe_category": "other",
+            "reviewer": "analyst",
+        },
+    )
+    assert reviewed.status_code == 200
+    human = client.get(f"/api/runs/{run_id}/items-page?label_source=human")
+    assert human.json()["total"] == 1
+    assert human.json()["items"][0]["prompt_id"] == "p1"
+
+
 def test_response_annotation_is_stored_and_targets_response(client):
     data = create_csv_run(
         client,
