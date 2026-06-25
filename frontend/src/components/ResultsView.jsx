@@ -393,19 +393,22 @@ export default function ResultsView({
               <span>Status: <strong>{selectedRun.status}</strong></span>
               <span>Task: <strong>{formatTaskType(selectedRun.task_type)}</strong></span>
               <span>Completed: <strong>{selectedRun.completed_items}/{selectedRun.total_items}</strong></span>
+              <span>Needs review: <strong>{selectedRun.human_review}</strong></span>
               <span>Failed rows: <strong>{selectedRun.failed_items}</strong></span>
               <span>Resumable: <strong>{selectedRun.resumable_items}</strong></span>
               <span>Provider failed: <strong>{selectedRun.provider_failed}</strong></span>
-              <span>Disagreement: <strong>{selectedRun.disagreement}</strong></span>
-              <span>Abstention: <strong>{selectedRun.abstention}</strong></span>
-              <span>Ambiguous: <strong>{selectedRun.ambiguous}</strong></span>
-              <span>Created: <strong>{selectedRun.created_at}</strong></span>
-              <span>Completed at: <strong>{selectedRun.completed_at || 'n/a'}</strong></span>
-              <span>Source: <strong>{selectedRun.source_filename || 'n/a'}</strong></span>
-              <span>Policy: <strong>{selectedRun.policy_version}</strong></span>
-              <span>Rule: <strong>{selectedRun.decision_rule_version}</strong></span>
-              <span>Models: <strong>{selectedRun.model_config_json?.models?.join(', ') || 'n/a'}</strong></span>
             </div>
+            <details className="run-details">
+              <summary>Run details</summary>
+              <div className="run-meta detail-meta">
+                <span>Source: <strong>{selectedRun.source_filename || 'n/a'}</strong></span>
+                <span>Created: <strong>{selectedRun.created_at}</strong></span>
+                <span>Completed at: <strong>{selectedRun.completed_at || 'n/a'}</strong></span>
+                <span>Policy: <strong>{selectedRun.policy_version}</strong></span>
+                <span>Rule: <strong>{selectedRun.decision_rule_version}</strong></span>
+                <span>Models: <strong>{selectedRun.model_config_json?.models?.join(', ') || 'n/a'}</strong></span>
+              </div>
+            </details>
           </>
         )}
 
