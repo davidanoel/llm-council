@@ -15,10 +15,12 @@ export const UNSAFE_CATEGORIES = [
 ];
 
 export function displayLabel(label) {
+  if (!label) return 'Failed';
   return label === 'needs_human_review' ? 'Needs review' : label;
 }
 
 export function effectiveLabel(annotation) {
+  if (annotation?.error_message && !annotation?.adjudication && !annotation?.human_reviews?.length) return 'failed';
   const review = annotation?.human_reviews?.at(-1);
   return review?.label || annotation?.adjudication?.final_label;
 }

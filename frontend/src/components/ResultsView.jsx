@@ -24,6 +24,7 @@ export default function ResultsView({
   const [runNameDraft, setRunNameDraft] = useState('');
   const [savingRunName, setSavingRunName] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [resuming, setResuming] = useState(false);
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideStatus, setOverrideStatus] = useState('');
 
@@ -38,6 +39,7 @@ export default function ResultsView({
       item.prompt_id,
       item.prompt_text,
       item.response_text,
+      item.error_message,
       item.adjudication?.unsafe_category,
       item.adjudication?.decision_type,
       item.review_reason_type,
@@ -52,6 +54,7 @@ export default function ResultsView({
     safe: annotations.filter((item) => effectiveLabel(item) === 'safe').length,
     unsafe: annotations.filter((item) => effectiveLabel(item) === 'unsafe').length,
     humanReview: annotations.filter((item) => item.adjudication?.decision_type === 'human_review').length,
+    failed: annotations.filter((item) => effectiveLabel(item) === 'failed').length,
   }), [annotations]);
   const selected = annotations.find((item) => item.prompt_id === selectedId);
   const displayedAgreement = importedAnalysis?.agreement || agreement;
@@ -60,6 +63,7 @@ export default function ResultsView({
     safe: importedAnalysis.safe_items,
     unsafe: importedAnalysis.unsafe_items,
     humanReview: importedAnalysis.human_review_items,
+    failed: 0,
   } : outcomeCounts;
 
   useEffect(() => {
@@ -198,6 +202,29 @@ export default function ResultsView({
     }
   }
 
+  async function resumeRun() {
+    if (!selectedRunId) return;
+    try {
+      setResuming(true);
+      const response = await api.resumeRun(selectedRunId);
+      const [items, metrics, runsList] = await Promise.all([
+        api.runItems(selectedRunId),
+        api.runAgreement(selectedRunId),
+        api.listRuns(),
+      ]);
+      setAnnotations(items);
+      setAgreement(metrics);
+      setRuns(runsList);
+      setImportedAnalysis(null);
+      setStatus(`Resumed ${response.progress.completed} rows; ${response.progress.failed} failed.`);
+      onDataChanged();
+    } catch (err) {
+      setStatus(err.message);
+    } finally {
+      setResuming(false);
+    }
+  }
+
   async function deleteSelectedRun() {
     if (!selectedRunId || !selectedRun) return;
     const confirmed = window.confirm(`Delete run ${selectedRun.name}? This cannot be undone.`);
@@ -300,6 +327,11 @@ export default function ResultsView({
                 {retrying ? 'Retrying...' : 'Retry provider failures'}
               </button>
             )}
+            {selectedRun?.resumable_items > 0 && (
+              <button type="button" className="secondary" disabled={resuming} onClick={resumeRun}>
+                {resuming ? 'Resuming...' : 'Resume run'}
+              </button>
+            )}
             <button type="button" className="secondary danger-button" disabled={!selectedRunId} onClick={deleteSelectedRun}>Delete run</button>
           </div>
         </div>
@@ -333,6 +365,8 @@ export default function ResultsView({
               <span>Status: <strong>{selectedRun.status}</strong></span>
               <span>Task: <strong>{formatTaskType(selectedRun.task_type)}</strong></span>
               <span>Completed: <strong>{selectedRun.completed_items}/{selectedRun.total_items}</strong></span>
+              <span>Failed rows: <strong>{selectedRun.failed_items}</strong></span>
+              <span>Resumable: <strong>{selectedRun.resumable_items}</strong></span>
               <span>Provider failed: <strong>{selectedRun.provider_failed}</strong></span>
               <span>Disagreement: <strong>{selectedRun.disagreement}</strong></span>
               <span>Abstention: <strong>{selectedRun.abstention}</strong></span>
@@ -369,10 +403,11 @@ export default function ResultsView({
             <div><span>Final safe rate</span><strong>{formatRatio(displayedCounts.safe, displayedTotal)}</strong></div>
             <div><span>Final unsafe rate</span><strong>{formatRatio(displayedCounts.unsafe, displayedTotal)}</strong></div>
             <div><span>Human-review rate</span><strong>{formatRatio(displayedCounts.humanReview, displayedTotal)}</strong></div>
+            <div><span>Failed rows</span><strong>{formatRatio(displayedCounts.failed, displayedTotal)}</strong></div>
           </div>
         )}
         <div className="filter-row">
-          {['all', 'safe', 'unsafe', 'needs_human_review'].map((value) => (
+          {['all', 'safe', 'unsafe', 'needs_human_review', 'failed'].map((value) => (
             <button key={value} type="button" className={filter === value ? 'filter active' : 'filter'} onClick={() => setFilter(value)}>{value === 'all' ? 'All' : displayLabel(value)}</button>
           ))}
         </div>
@@ -389,7 +424,7 @@ export default function ResultsView({
                     <td><Badge label={effectiveLabel(item)} /></td>
                     <td>{review ? 'human' : 'AI annotators'}</td>
                     <td>{review?.unsafe_category || item.adjudication?.unsafe_category || 'none'}</td>
-                    <td>{review ? 'reviewed' : item.adjudication?.decision_type}</td>
+                    <td>{item.error_message && !item.adjudication ? 'failed' : (review ? 'reviewed' : item.adjudication?.decision_type)}</td>
                     <td>{formatReason(item.review_reason_type)}</td>
                     <td>{item?.updated_at}</td>
                     <td className="row-actions">

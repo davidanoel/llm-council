@@ -307,6 +307,11 @@ textarea {
   background: #fafcfd;
 }
 
+.error-card {
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
 .label-row,
 .vote-strip,
 .button-row,
@@ -365,6 +370,12 @@ dd {
   border-color: #fde68a;
   background: #fffbeb;
   color: #92400e;
+}
+
+.badge.failed {
+  border-color: #fecaca;
+  background: #fff1f2;
+  color: #9f1239;
 }
 
 .review-workspace {

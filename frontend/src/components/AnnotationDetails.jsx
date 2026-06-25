@@ -23,6 +23,21 @@ export function AnnotationContent({ annotation }) {
 }
 
 export function DecisionSummary({ annotation }) {
+  if (annotation?.error_message && !annotation?.adjudication) {
+    return (
+      <div className="result-card error-card">
+        <div className="label-row">
+          <Badge label="failed" />
+          <span>Row failed during annotation</span>
+        </div>
+        <dl>
+          <dt>Created</dt><dd>{annotation.created_at}</dd>
+          <dt>Updated</dt><dd>{annotation.updated_at}</dd>
+          <dt>Error</dt><dd>{annotation.error_message}</dd>
+        </dl>
+      </div>
+    );
+  }
   if (!annotation?.adjudication) return <p className="muted">No decision available.</p>;
   const review = annotation.human_reviews?.at(-1);
   return (

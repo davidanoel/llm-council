@@ -124,6 +124,7 @@ class AnnotationResult(BaseModel):
     response_text: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
     row_number: Optional[int] = None
+    error_message: Optional[str] = None
     votes: List[ModelVote] = Field(default_factory=list)
     adjudication: Optional[CouncilDecision] = None
     review_reason_type: ReviewReasonType = "none"
@@ -154,6 +155,8 @@ class RunSummary(BaseModel):
     disagreement: int = 0
     abstention: int = 0
     ambiguous: int = 0
+    failed_items: int = 0
+    resumable_items: int = 0
     created_at: str
     completed_at: Optional[str] = None
 

@@ -390,6 +390,7 @@ def test_retry_provider_failures_skips_human_reviewed_items(tmp_path, monkeypatc
 
 def test_app_exception_counts_failed(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
+    original_annotate = backend_main.annotate_prompt
 
     async def broken_annotate(_prompt, run_id, row_number=None):
         del run_id, row_number
@@ -409,6 +410,27 @@ def test_app_exception_counts_failed(tmp_path, monkeypatch):
     assert progress["completed"] == 0
     assert progress["failed"] == 1
     assert progress["provider_failed"] == 0
+    run_id = result.json()["run"]["run_id"]
+    run = client.get(f"/api/runs/{run_id}").json()
+    assert run["status"] == "failed"
+    assert run["failed_items"] == 1
+    assert run["resumable_items"] == 1
+    item = client.get(f"/api/runs/{run_id}/items").json()[0]
+    assert item["prompt_id"] == "p1"
+    assert item["error_message"] == "boom"
+    assert item["adjudication"] is None
+
+    monkeypatch.setattr(backend_main, "annotate_prompt", original_annotate)
+    resumed = client.post(f"/api/runs/{run_id}/resume")
+    assert resumed.status_code == 200
+    assert resumed.json()["progress"]["completed"] == 1
+    assert resumed.json()["progress"]["failed"] == 0
+    assert resumed.json()["run"]["status"] == "completed"
+    assert resumed.json()["run"]["failed_items"] == 0
+    assert resumed.json()["run"]["resumable_items"] == 0
+    resumed_item = client.get(f"/api/runs/{run_id}/items").json()[0]
+    assert resumed_item["error_message"] is None
+    assert resumed_item["adjudication"]["decision_type"] == "auto_safe"
 
 
 def test_ambiguous_prompt_counts_human_review_not_provider_failed(client):

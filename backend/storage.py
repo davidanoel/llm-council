@@ -60,6 +60,7 @@ def connect() -> sqlite3.Connection:
             response_text TEXT,
             metadata_json TEXT NOT NULL,
             row_number INTEGER,
+            error_message TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             UNIQUE(run_id, prompt_id)
@@ -112,6 +113,7 @@ def connect() -> sqlite3.Connection:
         """
     )
     ensure_column(connection, "runs", "task_type", "TEXT NOT NULL DEFAULT 'prompt_classification'")
+    ensure_column(connection, "items", "error_message", "TEXT")
     connection.commit()
     return connection
 
@@ -202,6 +204,21 @@ def complete_run(run_id: str, status: str = "completed") -> RunSummary:
     return run
 
 
+def set_run_status(run_id: str, status: str, completed_at: str | None = None) -> RunSummary:
+    """Set run status without changing its items."""
+
+    with closing(connect()) as connection:
+        connection.execute(
+            "UPDATE runs SET status = ?, completed_at = ? WHERE run_id = ?",
+            (status, completed_at, run_id),
+        )
+        connection.commit()
+    run = load_run(run_id)
+    if run is None:
+        raise KeyError(f"Run {run_id} not found")
+    return run
+
+
 def rename_run(run_id: str, name: str) -> RunSummary:
     """Rename one run."""
 
@@ -246,6 +263,10 @@ def build_run_summary(connection: sqlite3.Connection, row: sqlite3.Row) -> RunSu
         SELECT
             COUNT(i.item_id) AS total_items,
             COUNT(d.item_id) AS completed_items,
+            SUM(CASE WHEN i.error_message IS NOT NULL AND d.item_id IS NULL THEN 1 ELSE 0 END) AS failed_items,
+            SUM(CASE WHEN d.item_id IS NULL AND NOT EXISTS (
+                SELECT 1 FROM human_reviews hr WHERE hr.item_id = i.item_id
+            ) THEN 1 ELSE 0 END) AS resumable_items,
             SUM(CASE WHEN d.decision_type = 'auto_safe' THEN 1 ELSE 0 END) AS auto_safe,
             SUM(CASE WHEN d.decision_type = 'auto_unsafe' THEN 1 ELSE 0 END) AS auto_unsafe,
             SUM(CASE WHEN d.decision_type = 'human_review' THEN 1 ELSE 0 END) AS human_review
@@ -283,6 +304,8 @@ def build_run_summary(connection: sqlite3.Connection, row: sqlite3.Row) -> RunSu
         disagreement=reason_counts["disagreement"],
         abstention=reason_counts["abstention"],
         ambiguous=reason_counts["ambiguous"],
+        failed_items=counts["failed_items"] or 0,
+        resumable_items=counts["resumable_items"] or 0,
         created_at=row["created_at"],
         completed_at=row["completed_at"],
     )
@@ -321,14 +344,15 @@ def upsert_annotation(connection: sqlite3.Connection, annotation: AnnotationResu
         """
         INSERT INTO items(
             item_id, run_id, prompt_id, prompt_text, response_text,
-            metadata_json, row_number, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            metadata_json, row_number, error_message, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(run_id, prompt_id) DO UPDATE SET
             item_id = excluded.item_id,
             prompt_text = excluded.prompt_text,
             response_text = excluded.response_text,
             metadata_json = excluded.metadata_json,
             row_number = excluded.row_number,
+            error_message = excluded.error_message,
             created_at = excluded.created_at,
             updated_at = excluded.updated_at
         """,
@@ -340,6 +364,7 @@ def upsert_annotation(connection: sqlite3.Connection, annotation: AnnotationResu
             annotation.response_text,
             json.dumps(annotation.metadata, sort_keys=True),
             annotation.row_number,
+            annotation.error_message,
             annotation.created_at,
             annotation.updated_at,
         ),
@@ -444,6 +469,16 @@ def list_retryable_annotations(run_id: str) -> List[AnnotationResult]:
     ]
 
 
+def list_resumable_annotations(run_id: str) -> List[AnnotationResult]:
+    """List non-reviewed items that do not have a final decision."""
+
+    return [
+        annotation
+        for annotation in list_annotations(run_id)
+        if annotation.adjudication is None and not annotation.human_reviews
+    ]
+
+
 def build_annotation(connection: sqlite3.Connection, item_id: str) -> AnnotationResult:
     """Build the nested API shape for one item."""
 
@@ -509,6 +544,7 @@ def build_annotation(connection: sqlite3.Connection, item_id: str) -> Annotation
         response_text=item["response_text"],
         metadata=json.loads(item["metadata_json"]),
         row_number=item["row_number"],
+        error_message=item["error_message"],
         votes=votes,
         adjudication=adjudication,
         human_reviews=reviews,

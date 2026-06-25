@@ -99,6 +99,7 @@ async def annotate_prompt(
         response_text=request.response_text,
         metadata=request.metadata,
         row_number=row_number,
+        error_message=None,
         votes=votes,
         adjudication=adjudication,
         human_reviews=existing.human_reviews if existing else [],
@@ -106,6 +107,30 @@ async def annotate_prompt(
         updated_at=utc_now(),
     )
     return storage.save_annotation(result, run_id=run_id, row_number=row_number)
+
+
+def failed_annotation(
+    request: AnnotationRequest,
+    run_id: str,
+    row_number: int | None,
+    error: Exception,
+) -> AnnotationResult:
+    """Build a persisted failed row for later resume."""
+
+    prompt_id = request.prompt_id or f"row_{row_number or 1}"
+    existing = storage.load_annotation(prompt_id, run_id=run_id)
+    return AnnotationResult(
+        prompt_id=prompt_id,
+        run_id=run_id,
+        prompt_text=request.prompt_text,
+        response_text=request.response_text,
+        metadata=request.metadata,
+        row_number=row_number,
+        error_message=str(error),
+        human_reviews=existing.human_reviews if existing else [],
+        created_at=existing.created_at if existing else utc_now(),
+        updated_at=utc_now(),
+    )
 
 
 @app.post("/api/runs/csv", response_model=BatchAnnotationResponse)
@@ -156,6 +181,7 @@ async def run_annotation_batch(
 
     progress = BatchProgress(total=len(prompts))
     semaphore = asyncio.Semaphore(MAX_PROMPT_CONCURRENCY)
+    storage.set_run_status(run.run_id, "running", completed_at=None)
 
     async def run_one(index_and_prompt: tuple[int, AnnotationRequest]) -> AnnotationResult | None:
         nonlocal progress
@@ -176,9 +202,14 @@ async def run_annotation_batch(
                 else:
                     progress.failed += 1
                 return result
-            except Exception:
+            except Exception as exc:
+                failed = failed_annotation(prompt, run.run_id, index, error=exc)
+                try:
+                    failed = storage.save_annotation(failed, run_id=run.run_id, row_number=index)
+                except Exception:
+                    pass
                 progress.failed += 1
-                return None
+                return failed
 
     raw_results = await asyncio.gather(
         *(run_one((index, prompt)) for index, prompt in enumerate(prompts, start=1))
@@ -197,6 +228,23 @@ def all_stage1_votes_provider_failed(result: AnnotationResult) -> bool:
         vote.parse_error is not None or "provider_failure" in vote.policy_triggers
         for vote in result.votes
     )
+
+
+def count_result(progress: BatchProgress, result: AnnotationResult) -> None:
+    """Update progress counters from a stored annotation result."""
+
+    if not result.adjudication:
+        progress.failed += 1
+        return
+    progress.completed += 1
+    if result.adjudication.decision_type == "auto_safe":
+        progress.auto_safe += 1
+    elif result.adjudication.decision_type == "auto_unsafe":
+        progress.auto_unsafe += 1
+    else:
+        progress.human_review += 1
+    if all_stage1_votes_provider_failed(result):
+        progress.provider_failed += 1
 
 
 @app.get("/api/runs", response_model=List[RunSummary])
@@ -276,6 +324,51 @@ async def retry_run_provider_failures(run_id: str) -> BatchAnnotationResponse:
     raw_results = await asyncio.gather(*(retry_one(annotation) for annotation in retryable))
     results = [result for result in raw_results if result is not None]
     return BatchAnnotationResponse(results=results, progress=progress, run=storage.load_run(run_id))
+
+
+@app.post("/api/runs/{run_id}/resume", response_model=BatchAnnotationResponse)
+async def resume_run(run_id: str) -> BatchAnnotationResponse:
+    """Resume app-level failed or incomplete rows in a run."""
+
+    run = storage.load_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    resumable = storage.list_resumable_annotations(run_id)
+    progress = BatchProgress(total=len(resumable))
+    semaphore = asyncio.Semaphore(MAX_PROMPT_CONCURRENCY)
+    storage.set_run_status(run_id, "running", completed_at=None)
+
+    async def resume_one(annotation: AnnotationResult) -> AnnotationResult:
+        async with semaphore:
+            request = AnnotationRequest(
+                prompt_id=annotation.prompt_id,
+                prompt_text=annotation.prompt_text,
+                response_text=annotation.response_text,
+                metadata=annotation.metadata,
+            )
+            try:
+                result = await annotate_prompt(
+                    request,
+                    run_id=run_id,
+                    row_number=annotation.row_number,
+                )
+                count_result(progress, result)
+                return result
+            except Exception as exc:
+                failed = failed_annotation(request, run_id, annotation.row_number, exc)
+                failed = storage.save_annotation(
+                    failed,
+                    run_id=run_id,
+                    row_number=annotation.row_number,
+                )
+                progress.failed += 1
+                return failed
+
+    results = list(await asyncio.gather(*(resume_one(annotation) for annotation in resumable)))
+    status = "failed" if progress.failed else "completed"
+    run = storage.complete_run(run_id, status)
+    return BatchAnnotationResponse(results=results, progress=progress, run=run)
 
 
 @app.get("/api/runs/{run_id}/agreement", response_model=AgreementMetrics)

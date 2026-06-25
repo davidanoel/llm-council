@@ -79,7 +79,7 @@ cd frontend && npm run dev
 
 1. **Annotate:** upload and validate a CSV, name the run, then explicitly start annotation.
 2. **Review:** resolve uncertain prompts for the selected run one at a time, filtered by review reason.
-3. **Results:** select a run, view AI agreement, retry provider failures, inspect votes, override any final label when needed, and export JSON or CSV.
+3. **Results:** select a run, view AI agreement, resume failed rows, retry provider failures, inspect votes, override any final label when needed, and export JSON or CSV.
 
 Review reasons are computed from the model votes:
 
@@ -89,6 +89,8 @@ Review reasons are computed from the model votes:
 - `ambiguous`
 
 The review queue shows counts by reason and offers an accept-suggestion button when the vote pattern supports one.
+
+App-level row failures are stored with their prompt text, row number, and error message. Use **Resume run** in Results to retry only rows that do not have a decision yet. Completed and human-reviewed rows are left untouched.
 
 ## CSV Input
 
@@ -123,6 +125,7 @@ Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
 - `GET /api/runs/{run_id}`
 - `PATCH /api/runs/{run_id}`
 - `GET /api/runs/{run_id}/items`
+- `POST /api/runs/{run_id}/resume`
 - `POST /api/runs/{run_id}/retry-provider-failures`
 - `GET /api/runs/{run_id}/agreement`
 - `GET /api/runs/{run_id}/review-queue`

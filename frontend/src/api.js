@@ -67,6 +67,12 @@ export const api = {
     });
   },
 
+  resumeRun(runId) {
+    return request(`/api/runs/${encodeURIComponent(runId)}/resume`, {
+      method: 'POST',
+    });
+  },
+
   deleteAnnotation(runId, promptId) {
     return request(`/api/runs/${encodeURIComponent(runId)}/items/${encodeURIComponent(promptId)}`, {
       method: 'DELETE',
