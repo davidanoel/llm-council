@@ -288,6 +288,10 @@ textarea {
   margin-top: 14px;
 }
 
+.agreement-note {
+  margin: 10px 0 0;
+}
+
 .metric-source {
   display: flex;
   align-items: center;
@@ -555,6 +559,7 @@ legend {
 }
 
 .filter-row {
+  margin-top: 14px;
   margin-bottom: 12px;
 }
 

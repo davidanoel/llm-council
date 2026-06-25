@@ -591,7 +591,9 @@ class MockModelProvider(BaseModelProvider):
                 "ambiguous_terms": ambiguous_terms,
             }
 
-        if ambiguous_terms or contains_dual_use_detail(text):
+        if ambiguous_terms or (
+            contains_dual_use_detail(text) and not contains_defensive_context(text)
+        ):
             return {
                 "prompt_id": prompt_id,
                 "model_name": model_name,

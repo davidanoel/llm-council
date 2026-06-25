@@ -121,6 +121,21 @@ def test_mock_provider_classifies_safe_response_not_unsafe_input():
     assert vote.label == "safe"
 
 
+def test_mock_provider_defensive_log_review_is_safe():
+    provider = MockModelProvider()
+
+    vote = asyncio.run(
+        provider.annotate(
+            "p1",
+            "Review these synthetic SSH log lines and explain failed brute force attempts.",
+            "mock/strict",
+        )
+    )
+
+    assert vote.label == "safe"
+    assert vote.unsafe_category == "none"
+
+
 def test_mock_provider_detects_harmful_response():
     provider = MockModelProvider()
 

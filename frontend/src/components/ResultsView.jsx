@@ -450,12 +450,18 @@ export default function ResultsView({
         {displayedAgreement && (
           <details className="agreement-details">
             <summary>Agreement details</summary>
-            <div className="metrics-grid agreement-summary">
-              <div><span>Pairwise agreement</span><strong>{formatPercent(displayedAgreement.observed_agreement)}</strong><small>Average model-pair agreement</small></div>
-              <div><span>All 3 matched</span><strong>{formatPercent(displayedAgreement.unanimous_rate)}</strong><small>Complete panels only</small></div>
-              <div><span>Complete vote panels</span><strong>{formatRatio(displayedAgreement.complete_items, displayedTotal)}</strong><small>All 3 votes succeeded</small></div>
-              <div><span>Fleiss kappa</span><strong>{displayedAgreement.fleiss_kappa ?? 'N/A'}</strong><small>Chance-corrected; unstable when labels are imbalanced</small></div>
-            </div>
+            {displayedAgreement.complete_items === 0 ? (
+              <p className="muted agreement-note">
+                Agreement is unavailable because no rows have three successful model votes. This usually means provider or parse failures; retry provider failures or run the demo with the mock provider.
+              </p>
+            ) : (
+              <div className="metrics-grid agreement-summary">
+                <div><span>Pairwise agreement</span><strong>{formatPercent(displayedAgreement.observed_agreement)}</strong><small>Average model-pair agreement</small></div>
+                <div><span>All 3 matched</span><strong>{formatPercent(displayedAgreement.unanimous_rate)}</strong><small>Complete panels only</small></div>
+                <div><span>Complete vote panels</span><strong>{formatRatio(displayedAgreement.complete_items, displayedTotal)}</strong><small>All 3 votes succeeded</small></div>
+                <div><span>Fleiss kappa</span><strong>{displayedAgreement.fleiss_kappa ?? 'N/A'}</strong><small>Chance-corrected; unstable when labels are imbalanced</small></div>
+              </div>
+            )}
           </details>
         )}
         <div className="filter-row">
