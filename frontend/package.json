@@ -1,5 +1,6 @@
 {
   "name": "cyber-annotation-frontend",
+  "description": "Replace repetitive human annotation with a controlled multi-model annotation panel, while preserving human review only for ambiguity and failures.",
   "private": true,
   "version": "0.0.0",
   "type": "module",

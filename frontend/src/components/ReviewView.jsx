@@ -3,7 +3,7 @@ import { api } from '../api';
 import { AnnotationContent, Badge, DecisionSummary, VoteDetails } from './AnnotationDetails';
 import { UNSAFE_CATEGORIES } from './annotationUtils';
 
-export default function ReviewView({ refreshVersion, onSaved }) {
+export default function ReviewView({ refreshVersion, selectedRunId, onSaved }) {
   const [queue, setQueue] = useState([]);
   const [index, setIndex] = useState(0);
   const [label, setLabel] = useState('safe');
@@ -20,18 +20,26 @@ export default function ReviewView({ refreshVersion, onSaved }) {
   }, [current]);
 
   const loadQueue = useCallback(async () => {
+    if (!selectedRunId) {
+      setQueue([]);
+      return;
+    }
     try {
-      const items = await api.reviewQueue();
+      const items = await api.runReviewQueue(selectedRunId);
       setQueue(items);
       setIndex(0);
     } catch (err) {
       setStatus(err.message);
     }
-  }, []);
+  }, [selectedRunId]);
 
   useEffect(() => {
     let active = true;
-    api.reviewQueue()
+    if (!selectedRunId) {
+      setQueue([]);
+      return () => { active = false; };
+    }
+    api.runReviewQueue(selectedRunId)
       .then((items) => {
         if (active) {
           setQueue(items);
@@ -40,7 +48,7 @@ export default function ReviewView({ refreshVersion, onSaved }) {
       })
       .catch((err) => { if (active) setStatus(err.message); });
     return () => { active = false; };
-  }, [refreshVersion]);
+  }, [refreshVersion, selectedRunId]);
 
   async function saveAndNext() {
     if (!current) return;
@@ -48,6 +56,7 @@ export default function ReviewView({ refreshVersion, onSaved }) {
     try {
       await api.humanReview({
         prompt_id: current.prompt_id,
+        run_id: current.run_id,
         label,
         unsafe_category: label === 'unsafe' ? category : 'none',
         rationale,

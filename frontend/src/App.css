@@ -450,6 +450,27 @@ legend {
   margin-bottom: 14px;
 }
 
+.run-selector {
+  display: grid;
+  grid-template-columns: 80px minmax(220px, 1fr);
+  gap: 12px;
+  align-items: center;
+  margin: 14px 0 8px;
+}
+
+.run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0 0 12px;
+  color: #52616f;
+  font-size: 13px;
+}
+
+.run-name-field {
+  margin-bottom: 12px;
+}
+
 .results-split {
   display: grid;
   grid-template-columns: minmax(560px, 1.7fr) minmax(340px, 1fr);

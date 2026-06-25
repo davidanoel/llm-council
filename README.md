@@ -6,7 +6,7 @@ Cyber Annotation Council labels cybersecurity prompts as:
 - `unsafe`
 - `needs_human_review`
 
-It is a local FastAPI and React/Vite application for batch annotation, human review, and label export.
+It is a local FastAPI and React/Vite application for run-based batch annotation, human review, and label export.
 Annotations are stored in the local SQLite file `data/annotations.db`.
 
 ## Decision Model
@@ -77,9 +77,9 @@ cd frontend && npm run dev
 
 ## UI Workflow
 
-1. **Annotate:** upload and validate a CSV, then explicitly start annotation. Single-prompt and JSON input are under Advanced.
-2. **Review:** resolve uncertain prompts one at a time and save the human label.
-3. **Results:** view AI agreement, filter completed annotations, inspect votes, and export JSON or CSV.
+1. **Annotate:** upload and validate a CSV, name the run, then explicitly start annotation. Single-prompt and JSON input are under Advanced.
+2. **Review:** resolve uncertain prompts for the selected run one at a time and save the human label.
+3. **Results:** select a run, view AI agreement, filter completed annotations, inspect votes, and export JSON or CSV.
 
 ## CSV Input
 
@@ -95,29 +95,29 @@ r1,How can I track users without consent?,I cannot help with covert tracking.,"{
 
 When `response` is empty, the prompt is classified normally. When it is present, the assistant response is classified and the prompt is used only as context. Refusals and safe redirections are safe even when the user input is unsafe.
 
-Missing IDs are generated from a stable hash of the prompt and optional response so different responses to the same input do not overwrite one another. JSON requests use `prompt_text` and optional `response_text`.
+Missing IDs are generated from a stable hash of the prompt and optional response so different responses to the same input do not overwrite one another.
 
 Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
 
 ## API
 
 - `GET /api/health`
-- `POST /api/annotate`
-- `POST /api/annotate/batch`
-- `POST /api/annotate/csv/validate`
-- `POST /api/annotate/csv`
-- `GET /api/annotations`
-- `GET /api/agreement`
-- `POST /api/agreement/csv`
-- `GET /api/review-queue`
+- `POST /api/runs/csv/validate`
+- `POST /api/runs/csv`
+- `GET /api/runs`
+- `GET /api/runs/{run_id}`
+- `GET /api/runs/{run_id}/items`
+- `GET /api/runs/{run_id}/agreement`
+- `GET /api/runs/{run_id}/review-queue`
+- `POST /api/exports/analyze-csv`
 - `POST /api/human-review`
-- `DELETE /api/annotations`
-- `DELETE /api/annotations/{prompt_id}`
-- `GET /api/export-labels`
-- `GET /api/export-labels.csv`
+- `DELETE /api/runs/{run_id}`
+- `DELETE /api/runs/{run_id}/items/{prompt_id}`
+- `GET /api/runs/{run_id}/export-labels`
+- `GET /api/runs/{run_id}/export-labels.csv`
 
 Exports use the latest human label when present.
-JSON exports include the complete structured model vote list, plus `created_at` and `updated_at`. CSV exports include those same top-level timestamp fields and flatten the three votes into `vote_1_*`, `vote_2_*`, and `vote_3_*` columns for model name and label only.
+JSON exports include the complete structured model vote list, plus `created_at` and `updated_at`. CSV exports include those same top-level timestamp fields and flatten the three votes into `vote_1_*`, `vote_2_*`, and `vote_3_*` columns for model name, label, confidence, unsafe category, parse error, and rationale.
 Use **Analyze CSV** in Results to recompute metrics from a previous labels export without storing or re-annotating it.
 
 ## Tests

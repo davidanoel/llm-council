@@ -1,27 +1,12 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { DecisionSummary, VoteDetails } from './AnnotationDetails';
-
-const JSON_SAMPLE = JSON.stringify([
-  { prompt_id: 'demo-safe', prompt_text: 'How do I kill port 8080?', metadata: { source: 'demo' } },
-  {
-    prompt_id: 'demo-safe-refusal',
-    prompt_text: 'How can I track users without their consent?',
-    response_text: "I can't help track people without consent.",
-    metadata: { source: 'demo' },
-  },
-], null, 2);
 
 export default function AnnotateView({ onComplete }) {
   const [csvFile, setCsvFile] = useState(null);
   const [csvText, setCsvText] = useState('');
+  const [runName, setRunName] = useState('');
   const [validation, setValidation] = useState(null);
   const [summary, setSummary] = useState(null);
-  const [singleResult, setSingleResult] = useState(null);
-  const [singlePrompt, setSinglePrompt] = useState('');
-  const [singleResponse, setSingleResponse] = useState('');
-  const [singleMetadata, setSingleMetadata] = useState('{}');
-  const [jsonText, setJsonText] = useState(JSON_SAMPLE);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
 
@@ -36,6 +21,7 @@ export default function AnnotateView({ onComplete }) {
       const result = await api.validateCsv(text);
       setCsvFile(file);
       setCsvText(text);
+      setRunName(file.name.replace(/\.[^.]+$/, ''));
       setValidation(result);
       setStatus('CSV is ready to run.');
     } catch (err) {
@@ -51,43 +37,13 @@ export default function AnnotateView({ onComplete }) {
     setError('');
     setStatus(`Annotating ${validation.valid_rows} prompts...`);
     try {
-      const response = await api.annotateCsv(csvText);
+      const response = await api.annotateCsv(csvText, {
+        runName: runName.trim() || csvFile?.name || undefined,
+        sourceFilename: csvFile?.name,
+      });
       setSummary(response.progress);
       setStatus('Batch annotation complete.');
-      onComplete(response.results);
-    } catch (err) {
-      setError(err.message);
-      setStatus('');
-    }
-  }
-
-  async function runSingle(event) {
-    event.preventDefault();
-    setError('');
-    setStatus('Annotating prompt...');
-    try {
-      const metadata = singleMetadata.trim() ? JSON.parse(singleMetadata) : {};
-      const payload = { prompt_text: singlePrompt, metadata };
-      if (singleResponse.trim()) payload.response_text = singleResponse.trim();
-      const result = await api.annotate(payload);
-      setSingleResult(result);
-      setStatus('Annotation complete.');
-    } catch (err) {
-      setError(err.message);
-      setStatus('');
-    }
-  }
-
-  async function runJsonBatch() {
-    setError('');
-    setStatus('Running JSON batch...');
-    try {
-      const prompts = JSON.parse(jsonText);
-      if (!Array.isArray(prompts)) throw new Error('JSON input must be an array.');
-      const response = await api.annotateBatch(prompts);
-      setSummary(response.progress);
-      setStatus('Batch annotation complete.');
-      onComplete(response.results);
+      onComplete(response);
     } catch (err) {
       setError(err.message);
       setStatus('');
@@ -107,37 +63,16 @@ export default function AnnotateView({ onComplete }) {
           <input type="file" accept=".csv,text/csv" onChange={selectCsv} />
         </label>
         {validation && (
-          <div className="validation-summary">
-            <strong>{validation.valid_rows.toLocaleString()} valid rows</strong>
-            <button type="button" onClick={runCsv}>Run annotation</button>
-          </div>
+          <>
+            <label className="run-name-field">Run name<input value={runName} onChange={(event) => setRunName(event.target.value)} /></label>
+            <div className="validation-summary">
+              <strong>{validation.valid_rows.toLocaleString()} valid rows</strong>
+              <button type="button" onClick={runCsv}>Run annotation</button>
+            </div>
+          </>
         )}
         {summary && <BatchSummary summary={summary} />}
       </section>
-
-      <details className="panel advanced-panel">
-        <summary>Advanced: single prompt</summary>
-        <form className="form advanced-content" onSubmit={runSingle}>
-          <label>Prompt<textarea rows={5} required value={singlePrompt} onChange={(event) => setSinglePrompt(event.target.value)} /></label>
-          <label>Assistant response (optional)<textarea rows={5} value={singleResponse} onChange={(event) => setSingleResponse(event.target.value)} /></label>
-          <label>Metadata JSON<textarea rows={3} value={singleMetadata} onChange={(event) => setSingleMetadata(event.target.value)} /></label>
-          <button type="submit">Annotate prompt</button>
-        </form>
-        {singleResult && (
-          <div className="advanced-content">
-            <DecisionSummary annotation={singleResult} />
-            <details><summary>Show model votes</summary><VoteDetails annotation={singleResult} /></details>
-          </div>
-        )}
-      </details>
-
-      <details className="panel advanced-panel">
-        <summary>Advanced: JSON batch</summary>
-        <div className="advanced-content">
-          <textarea rows={10} value={jsonText} onChange={(event) => setJsonText(event.target.value)} />
-          <button type="button" onClick={runJsonBatch}>Run JSON batch</button>
-        </div>
-      </details>
     </section>
   );
 }

@@ -3,7 +3,14 @@ import { api } from '../api';
 import { AnnotationContent, Badge, DecisionSummary, VoteDetails } from './AnnotationDetails';
 import { displayLabel, effectiveLabel } from './annotationUtils';
 
-export default function ResultsView({ refreshVersion, onReview, onDataChanged }) {
+export default function ResultsView({
+  refreshVersion,
+  selectedRunId,
+  onRunSelected,
+  onReview,
+  onDataChanged,
+}) {
+  const [runs, setRuns] = useState([]);
   const [annotations, setAnnotations] = useState([]);
   const [filter, setFilter] = useState('all');
   const [searchInput, setSearchInput] = useState('');
@@ -14,6 +21,7 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
   const [status, setStatus] = useState('');
   const [deletingId, setDeletingId] = useState(null);
 
+  const selectedRun = runs.find((run) => run.run_id === selectedRunId);
   const filtered = useMemo(() => annotations.filter((item) => {
     const filterMatch = filter === 'all' || effectiveLabel(item) === filter;
     if (!filterMatch) return false;
@@ -49,7 +57,28 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
 
   useEffect(() => {
     let active = true;
-    Promise.all([api.listAnnotations(), api.agreement()])
+    api.listRuns()
+      .then((items) => {
+        if (!active) return;
+        setRuns(items);
+        if (!selectedRunId && items[0]?.run_id) {
+          onRunSelected(items[0].run_id);
+        }
+      })
+      .catch((err) => { if (active) setStatus(err.message); });
+    return () => { active = false; };
+  }, [refreshVersion, selectedRunId, onRunSelected]);
+
+  useEffect(() => {
+    let active = true;
+    if (!selectedRunId) {
+      setAnnotations([]);
+      setAgreement(null);
+      setSelectedId(null);
+      return () => { active = false; };
+    }
+
+    Promise.all([api.runItems(selectedRunId), api.runAgreement(selectedRunId)])
       .then(([items, metrics]) => {
         if (active) {
           setAnnotations(items);
@@ -59,7 +88,7 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
       })
       .catch((err) => { if (active) setStatus(err.message); });
     return () => { active = false; };
-  }, [refreshVersion]);
+  }, [refreshVersion, selectedRunId]);
 
   useEffect(() => {
     const handle = setTimeout(() => {
@@ -81,8 +110,9 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
   }, [filtered, selectedId]);
 
   async function downloadCsv() {
+    if (!selectedRunId) return;
     try {
-      const blob = await api.exportLabelsCsv(true);
+      const blob = await api.exportLabelsCsv(selectedRunId, true);
       download(blob, 'labels.csv');
     } catch (err) {
       setStatus(err.message);
@@ -90,8 +120,9 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
   }
 
   async function downloadJson() {
+    if (!selectedRunId) return;
     try {
-      const labels = await api.exportLabels(true);
+      const labels = await api.exportRunLabels(selectedRunId, true);
       download(new Blob([JSON.stringify(labels, null, 2)], { type: 'application/json' }), 'labels.json');
     } catch (err) {
       setStatus(err.message);
@@ -112,17 +143,21 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
     }
   }
 
-  async function clearDatabase() {
-    const confirmed = window.confirm('Delete all stored annotations? This cannot be undone.');
+  async function deleteSelectedRun() {
+    if (!selectedRunId || !selectedRun) return;
+    const confirmed = window.confirm(`Delete run ${selectedRun.name}? This cannot be undone.`);
     if (!confirmed) return;
 
     try {
-      await api.clearAnnotations();
+      await api.deleteRun(selectedRunId);
+      const nextRuns = runs.filter((run) => run.run_id !== selectedRunId);
+      setRuns(nextRuns);
       setAnnotations([]);
       setAgreement(null);
       setImportedAnalysis(null);
       setSelectedId(null);
-      setStatus('Database cleared.');
+      onRunSelected(nextRuns[0]?.run_id || null);
+      setStatus(`Deleted run ${selectedRun.name}.`);
       onDataChanged();
     } catch (err) {
       setStatus(err.message);
@@ -135,7 +170,7 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
 
     try {
       setDeletingId(item.prompt_id);
-      await api.deleteAnnotation(item.prompt_id);
+      await api.deleteAnnotation(selectedRunId, item.prompt_id);
       const next = annotations.filter((entry) => entry.prompt_id !== item.prompt_id);
       setAnnotations(next);
       setSelectedId((current) => {
@@ -143,7 +178,7 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
         return next[0]?.prompt_id || null;
       });
       setImportedAnalysis(null);
-      const metrics = await api.agreement();
+      const metrics = selectedRunId ? await api.runAgreement(selectedRunId) : null;
       setAgreement(metrics);
       setStatus(`Deleted ${item.prompt_id}.`);
       onDataChanged();
@@ -177,15 +212,43 @@ export default function ResultsView({ refreshVersion, onReview, onDataChanged })
     <section className="results-split">
       <section className="panel results-panel results-list-panel">
         <div className="results-toolbar">
-          <div><h2>Annotation results</h2><p className="muted">{filtered.length} of {annotations.length} items</p></div>
+          <div>
+            <h2>Annotation results</h2>
+            <p className="muted">{selectedRun ? selectedRun.name : 'Select a run'} · {filtered.length} of {annotations.length} items</p>
+          </div>
           <div className="button-row">
             {annotations.some((item) => effectiveLabel(item) === 'needs_human_review') && <button type="button" onClick={onReview}>Review unresolved</button>}
-            <button type="button" className="secondary" onClick={downloadJson}>Export JSON</button>
-            <button type="button" className="secondary" onClick={downloadCsv}>Export CSV</button>
+            <button type="button" className="secondary" disabled={!selectedRunId} onClick={downloadJson}>Export JSON</button>
+            <button type="button" className="secondary" disabled={!selectedRunId} onClick={downloadCsv}>Export CSV</button>
             <label className="upload-button">Analyze CSV<input type="file" accept=".csv,text/csv" onChange={analyzeCsv} /></label>
-            <button type="button" className="secondary danger-button" onClick={clearDatabase}>Clear database</button>
+            <button type="button" className="secondary danger-button" disabled={!selectedRunId} onClick={deleteSelectedRun}>Delete run</button>
           </div>
         </div>
+
+        <div className="run-selector">
+          <label htmlFor="run-select">Run</label>
+          <select
+            id="run-select"
+            value={selectedRunId || ''}
+            onChange={(event) => onRunSelected(event.target.value || null)}
+          >
+            <option value="">No run selected</option>
+            {runs.map((run) => (
+              <option key={run.run_id} value={run.run_id}>
+                {run.name} · {run.total_items} items
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {selectedRun && (
+          <div className="run-meta">
+            <span>Status: <strong>{selectedRun.status}</strong></span>
+            <span>Source: <strong>{selectedRun.source_filename || 'n/a'}</strong></span>
+            <span>Models: <strong>{selectedRun.model_config_json?.models?.join(', ') || 'n/a'}</strong></span>
+          </div>
+        )}
+
         <div className="search-row">
           <label htmlFor="results-search" className="search-label">Search prompts</label>
           <input

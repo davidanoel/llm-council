@@ -22,22 +22,12 @@ export const api = {
     return request('/api/health');
   },
 
-  annotate(payload) {
-    return request('/api/annotate', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  },
-
-  annotateBatch(prompts) {
-    return request('/api/annotate/batch', {
-      method: 'POST',
-      body: JSON.stringify({ prompts }),
-    });
-  },
-
-  annotateCsv(csvText) {
-    return request('/api/annotate/csv', {
+  annotateCsv(csvText, { runName, sourceFilename } = {}) {
+    const params = new URLSearchParams();
+    if (runName) params.set('run_name', runName);
+    if (sourceFilename) params.set('source_filename', sourceFilename);
+    const suffix = params.toString() ? `?${params}` : '';
+    return request(`/api/runs/csv${suffix}`, {
       method: 'POST',
       headers: { 'Content-Type': 'text/csv' },
       body: csvText,
@@ -45,43 +35,51 @@ export const api = {
   },
 
   validateCsv(csvText) {
-    return request('/api/annotate/csv/validate', {
+    return request('/api/runs/csv/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'text/csv' },
       body: csvText,
     });
   },
 
-  listAnnotations() {
-    return request('/api/annotations');
+  listRuns() {
+    return request('/api/runs');
   },
 
-  clearAnnotations() {
-    return request('/api/annotations', {
+  getRun(runId) {
+    return request(`/api/runs/${encodeURIComponent(runId)}`);
+  },
+
+  runItems(runId) {
+    return request(`/api/runs/${encodeURIComponent(runId)}/items`);
+  },
+
+  deleteAnnotation(runId, promptId) {
+    return request(`/api/runs/${encodeURIComponent(runId)}/items/${encodeURIComponent(promptId)}`, {
       method: 'DELETE',
     });
   },
 
-  deleteAnnotation(promptId) {
-    return request(`/api/annotations/${encodeURIComponent(promptId)}`, {
+  deleteRun(runId) {
+    return request(`/api/runs/${encodeURIComponent(runId)}`, {
       method: 'DELETE',
     });
   },
 
-  agreement() {
-    return request('/api/agreement');
+  runAgreement(runId) {
+    return request(`/api/runs/${encodeURIComponent(runId)}/agreement`);
   },
 
   analyzeExportCsv(csvText) {
-    return request('/api/agreement/csv', {
+    return request('/api/exports/analyze-csv', {
       method: 'POST',
       headers: { 'Content-Type': 'text/csv' },
       body: csvText,
     });
   },
 
-  reviewQueue() {
-    return request('/api/review-queue');
+  runReviewQueue(runId) {
+    return request(`/api/runs/${encodeURIComponent(runId)}/review-queue`);
   },
 
   humanReview(payload) {
@@ -91,12 +89,13 @@ export const api = {
     });
   },
 
-  exportLabels(includePromptText = false) {
-    return request(`/api/export-labels?include_prompt_text=${includePromptText}`);
+  exportRunLabels(runId, includePromptText = false) {
+    return request(`/api/runs/${encodeURIComponent(runId)}/export-labels?include_prompt_text=${includePromptText}`);
   },
 
-  async exportLabelsCsv(includePromptText = false) {
-    const response = await fetch(`${API_BASE}/api/export-labels.csv?include_prompt_text=${includePromptText}`);
+  async exportLabelsCsv(runId, includePromptText = false) {
+    const path = `/api/runs/${encodeURIComponent(runId)}/export-labels.csv?include_prompt_text=${includePromptText}`;
+    const response = await fetch(`${API_BASE}${path}`);
     if (!response.ok) {
       const detail = await response.text();
       throw new Error(detail || `Request failed: ${response.status}`);

@@ -37,12 +37,6 @@ class AnnotationRequest(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
-class BatchAnnotationRequest(BaseModel):
-    """Request to annotate multiple prompts."""
-
-    prompts: List[AnnotationRequest]
-
-
 class BatchProgress(BaseModel):
     """Batch annotation progress counters."""
 
@@ -60,6 +54,7 @@ class BatchAnnotationResponse(BaseModel):
 
     results: List["AnnotationResult"]
     progress: BatchProgress
+    run: Optional["RunSummary"] = None
 
 
 class ModelVote(BaseModel):
@@ -92,6 +87,7 @@ class HumanReviewRequest(BaseModel):
     """Human override for a prompt annotation."""
 
     prompt_id: str
+    run_id: Optional[str] = None
     label: HumanLabel
     unsafe_category: UnsafeCategory = "none"
     rationale: Optional[str] = None
@@ -111,15 +107,38 @@ class HumanReview(BaseModel):
 class AnnotationResult(BaseModel):
     """Stored annotation case."""
 
+    item_id: Optional[str] = None
+    run_id: Optional[str] = None
     prompt_id: str
     prompt_text: str
     response_text: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    row_number: Optional[int] = None
     votes: List[ModelVote] = Field(default_factory=list)
     adjudication: Optional[CouncilDecision] = None
     human_reviews: List[HumanReview] = Field(default_factory=list)
     created_at: str
     updated_at: str
+
+
+class RunSummary(BaseModel):
+    """Stored annotation run summary."""
+
+    run_id: str
+    name: str
+    source_filename: Optional[str] = None
+    policy_version: str = "cyber-policy-v1"
+    model_config_json: Dict[str, Any] = Field(default_factory=dict)
+    decision_rule_version: str = "majority-v1"
+    status: Literal["running", "completed", "failed"] = "completed"
+    total_items: int = 0
+    completed_items: int = 0
+    auto_safe: int = 0
+    auto_unsafe: int = 0
+    human_review: int = 0
+    provider_failed: int = 0
+    created_at: str
+    completed_at: Optional[str] = None
 
 
 class ExportedLabel(BaseModel):

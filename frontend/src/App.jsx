@@ -16,11 +16,16 @@ export default function App() {
   const [health, setHealth] = useState(null);
   const [reviewCount, setReviewCount] = useState(0);
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const [selectedRunId, setSelectedRunId] = useState(null);
 
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth(null));
-    api.reviewQueue().then((queue) => setReviewCount(queue.length)).catch(() => setReviewCount(0));
-  }, [refreshVersion]);
+    if (!selectedRunId) {
+      setReviewCount(0);
+      return;
+    }
+    api.runReviewQueue(selectedRunId).then((queue) => setReviewCount(queue.length)).catch(() => setReviewCount(0));
+  }, [refreshVersion, selectedRunId]);
 
   function dataChanged() {
     setRefreshVersion((value) => value + 1);
@@ -54,14 +59,29 @@ export default function App() {
 
       {view === 'annotate' && (
         <AnnotateView
-          onComplete={() => {
+          onComplete={(response) => {
+            if (response?.run?.run_id) setSelectedRunId(response.run.run_id);
             dataChanged();
             setView('results');
           }}
         />
       )}
-      {view === 'review' && <ReviewView refreshVersion={refreshVersion} onSaved={dataChanged} />}
-      {view === 'results' && <ResultsView refreshVersion={refreshVersion} onReview={() => setView('review')} onDataChanged={dataChanged} />}
+      {view === 'review' && (
+        <ReviewView
+          refreshVersion={refreshVersion}
+          selectedRunId={selectedRunId}
+          onSaved={dataChanged}
+        />
+      )}
+      {view === 'results' && (
+        <ResultsView
+          refreshVersion={refreshVersion}
+          selectedRunId={selectedRunId}
+          onRunSelected={setSelectedRunId}
+          onReview={() => setView('review')}
+          onDataChanged={dataChanged}
+        />
+      )}
     </main>
   );
 }
