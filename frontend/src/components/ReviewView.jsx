@@ -17,7 +17,7 @@ export default function ReviewView({ refreshVersion, selectedRunId, onSaved }) {
     return counts;
   }, [current]);
 
-  const loadQueue = useCallback(async () => {
+  const loadQueue = useCallback(async (nextIndex = 0) => {
     if (!selectedRunId) {
       setQueue([]);
       return;
@@ -29,7 +29,7 @@ export default function ReviewView({ refreshVersion, selectedRunId, onSaved }) {
       ]);
       setQueue(items);
       setRun(runSummary);
-      setIndex(0);
+      setIndex(Math.min(nextIndex, Math.max(items.length - 1, 0)));
     } catch (err) {
       setStatus(err.message);
     }
@@ -54,29 +54,35 @@ export default function ReviewView({ refreshVersion, selectedRunId, onSaved }) {
     return () => { active = false; };
   }, [refreshVersion, selectedRunId, reasonFilter]);
 
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (!queue.length) return;
+      if (isEditableTarget(event.target)) return;
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        setIndex((currentIndex) => Math.max(0, currentIndex - 1));
+      }
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        setIndex((currentIndex) => Math.min(queue.length - 1, currentIndex + 1));
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [queue.length]);
+
   async function saveAndNext(payload) {
     if (!current) return;
     setStatus('Saving review...');
     try {
       await api.humanReview(payload);
-      await loadQueue();
+      await loadQueue(index);
       onSaved();
       setStatus('Review saved.');
     } catch (err) {
       setStatus(err.message);
     }
-  }
-
-  async function acceptSuggestion() {
-    if (!current?.suggested_label) return;
-    await saveAndNext({
-      prompt_id: current.prompt_id,
-      run_id: current.run_id,
-      label: current.suggested_label,
-      unsafe_category: current.suggested_label === 'unsafe' ? current.suggested_unsafe_category : 'none',
-      rationale: `Accepted AI suggestion for ${formatReason(current.review_reason_type)}.`,
-      reviewer: 'local-user',
-    });
   }
 
   if (!current) {
@@ -107,10 +113,10 @@ export default function ReviewView({ refreshVersion, selectedRunId, onSaved }) {
       <AnnotationContent annotation={current} />
 
       {current.suggested_label && (
-        <div className="suggestion-box">
-          <span>Suggestion: <strong>{current.suggested_label}</strong>{current.suggested_label === 'unsafe' ? ` · ${current.suggested_unsafe_category}` : ''}</span>
-          <button type="button" onClick={acceptSuggestion}>Accept {current.suggested_label}</button>
-        </div>
+        <p className="suggestion-hint">
+          Suggested label: <Badge label={current.suggested_label} />
+          {current.suggested_label === 'unsafe' ? ` ${current.suggested_unsafe_category}` : ''}
+        </p>
       )}
 
       <HumanLabelForm annotation={current} submitLabel="Save and next" status={status} onSubmit={saveAndNext} />
@@ -151,4 +157,8 @@ function ReasonFilters({ active, counts, onChange }) {
 
 function formatReason(reasonType) {
   return (reasonType || 'ambiguous').replaceAll('_', ' ');
+}
+
+function isEditableTarget(target) {
+  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName);
 }

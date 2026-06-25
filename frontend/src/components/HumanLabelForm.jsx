@@ -22,6 +22,28 @@ export default function HumanLabelForm({
     setRationale('');
   }, [annotation?.prompt_id, annotation?.updated_at]);
 
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (isEditableTarget(event.target)) return;
+      const key = event.key.toLowerCase();
+      if (key === 's') {
+        event.preventDefault();
+        setLabel('safe');
+      }
+      if (key === 'u') {
+        event.preventDefault();
+        setLabel('unsafe');
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        submit();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [annotation, label, category, rationale, reviewer]);
+
   function submit() {
     if (!annotation) return;
     onSubmit({
@@ -57,4 +79,8 @@ export default function HumanLabelForm({
       {status && <span className="muted">{status}</span>}
     </div>
   );
+}
+
+function isEditableTarget(target) {
+  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName);
 }
