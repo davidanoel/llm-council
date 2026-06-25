@@ -235,6 +235,15 @@ textarea {
   background: #edf9f2;
 }
 
+.validation-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 8px 0 0;
+  color: #52616f;
+  font-size: 13px;
+}
+
 .summary-grid,
 .metrics-grid {
   display: grid;

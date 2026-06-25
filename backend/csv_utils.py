@@ -6,13 +6,33 @@ import csv
 import hashlib
 import io
 import json
+from dataclasses import dataclass
 from typing import List
 
 from .schemas import AnnotationRequest
 
 
+@dataclass
+class CsvAnnotationParseResult:
+    """Parsed CSV records plus lightweight validation details."""
+
+    prompts: List[AnnotationRequest]
+    valid_rows: int
+    rows_with_response: int
+    rows_without_response: int
+    skipped_empty_prompt_rows: int
+    task_type: str
+    mixed_task_warning: str | None = None
+
+
 def parse_csv_annotations(csv_text: str) -> List[AnnotationRequest]:
     """Parse CSV rows into annotation requests."""
+
+    return parse_csv_annotation_file(csv_text).prompts
+
+
+def parse_csv_annotation_file(csv_text: str) -> CsvAnnotationParseResult:
+    """Parse CSV rows into annotation requests and validation details."""
 
     reader = csv.DictReader(io.StringIO(csv_text))
     if not reader.fieldnames:
@@ -42,9 +62,13 @@ def parse_csv_annotations(csv_text: str) -> List[AnnotationRequest]:
     )
 
     requests = []
+    skipped_empty_prompt_rows = 0
+    rows_with_response = 0
+    rows_without_response = 0
     for index, row in enumerate(reader, start=1):
         prompt = (row.get(prompt_column) or "").strip()
         if not prompt:
+            skipped_empty_prompt_rows += 1
             continue
 
         response = (
@@ -52,6 +76,10 @@ def parse_csv_annotations(csv_text: str) -> List[AnnotationRequest]:
             if response_column
             else None
         )
+        if response:
+            rows_with_response += 1
+        else:
+            rows_without_response += 1
         prompt_id = (row.get("prompt_id") or "").strip() or deterministic_prompt_id(
             prompt, response
         )
@@ -65,7 +93,30 @@ def parse_csv_annotations(csv_text: str) -> List[AnnotationRequest]:
             )
         )
 
-    return requests
+    task_type = infer_task_type(rows_with_response, rows_without_response)
+    return CsvAnnotationParseResult(
+        prompts=requests,
+        valid_rows=len(requests),
+        rows_with_response=rows_with_response,
+        rows_without_response=rows_without_response,
+        skipped_empty_prompt_rows=skipped_empty_prompt_rows,
+        task_type=task_type,
+        mixed_task_warning=(
+            "Mixed prompt and response rows detected. Rows with responses classify the response; rows without responses classify the prompt."
+            if task_type == "mixed"
+            else None
+        ),
+    )
+
+
+def infer_task_type(rows_with_response: int, rows_without_response: int) -> str:
+    """Infer the run task type from response-column usage."""
+
+    if rows_with_response and rows_without_response:
+        return "mixed"
+    if rows_with_response:
+        return "response_classification"
+    return "prompt_classification"
 
 
 def deterministic_prompt_id(prompt: str, response: str | None = None) -> str:

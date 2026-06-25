@@ -42,6 +42,7 @@ def connect() -> sqlite3.Connection:
             run_id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             source_filename TEXT,
+            task_type TEXT NOT NULL DEFAULT 'prompt_classification',
             policy_version TEXT NOT NULL,
             model_config_json TEXT NOT NULL,
             decision_rule_version TEXT NOT NULL,
@@ -109,13 +110,23 @@ def connect() -> sqlite3.Connection:
             ON human_reviews(item_id, reviewed_at);
         """
     )
+    ensure_column(connection, "runs", "task_type", "TEXT NOT NULL DEFAULT 'prompt_classification'")
     connection.commit()
     return connection
+
+
+def ensure_column(connection: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    """Add a column when opening an older local SQLite file."""
+
+    columns = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+    if column not in columns:
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def create_run(
     name: Optional[str] = None,
     source_filename: Optional[str] = None,
+    task_type: str = "prompt_classification",
     model_config: Optional[Dict[str, Any]] = None,
     run_id: Optional[str] = None,
 ) -> RunSummary:
@@ -126,6 +137,7 @@ def create_run(
         run_id=run_id or str(uuid.uuid4()),
         name=name or "Annotation run",
         source_filename=source_filename,
+        task_type=task_type,
         policy_version=POLICY_VERSION,
         model_config_json=model_config or {},
         decision_rule_version=DECISION_RULE_VERSION,
@@ -145,12 +157,13 @@ def upsert_run(connection: sqlite3.Connection, run: RunSummary) -> None:
     connection.execute(
         """
         INSERT INTO runs(
-            run_id, name, source_filename, policy_version, model_config_json,
+            run_id, name, source_filename, task_type, policy_version, model_config_json,
             decision_rule_version, status, created_at, completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(run_id) DO UPDATE SET
             name = excluded.name,
             source_filename = excluded.source_filename,
+            task_type = excluded.task_type,
             policy_version = excluded.policy_version,
             model_config_json = excluded.model_config_json,
             decision_rule_version = excluded.decision_rule_version,
@@ -162,6 +175,7 @@ def upsert_run(connection: sqlite3.Connection, run: RunSummary) -> None:
             run.run_id,
             run.name,
             run.source_filename,
+            run.task_type,
             run.policy_version,
             json.dumps(run.model_config_json, sort_keys=True),
             run.decision_rule_version,
@@ -259,6 +273,7 @@ def build_run_summary(connection: sqlite3.Connection, row: sqlite3.Row) -> RunSu
         run_id=row["run_id"],
         name=row["name"],
         source_filename=row["source_filename"],
+        task_type=row["task_type"],
         policy_version=row["policy_version"],
         model_config_json=json.loads(row["model_config_json"]),
         decision_rule_version=row["decision_rule_version"],
@@ -613,6 +628,7 @@ def export_labels(
             ExportedLabel(
                 run_id=annotation.run_id or run_id,
                 run_name=run.name,
+                task_type=run.task_type,
                 row_number=annotation.row_number,
                 prompt_id=annotation.prompt_id,
                 label=label,

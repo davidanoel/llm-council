@@ -95,6 +95,12 @@ r1,How can I track users without consent?,I cannot help with covert tracking.,"{
 
 When `response` is empty, the prompt is classified normally. When it is present, the assistant response is classified and the prompt is used only as context. Refusals and safe redirections are safe even when the user input is unsafe.
 
+Validation reports the inferred run task type:
+
+- `prompt_classification`: rows without responses.
+- `response_classification`: rows with responses.
+- `mixed`: both styles are present. This is allowed, and the UI shows a warning.
+
 Missing IDs are generated from a stable hash of the prompt and optional response so different responses to the same input do not overwrite one another.
 
 Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
@@ -119,7 +125,7 @@ Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
 - `GET /api/runs/{run_id}/export-labels.csv`
 
 Exports use the latest human label when present.
-JSON exports include the complete structured model vote list, run id/name, row number, decision type, and timestamps. CSV exports include the same run/item traceability and flatten the three votes into `vote_1_*`, `vote_2_*`, and `vote_3_*` columns for model name, label, confidence, unsafe category, parse error, and rationale.
+JSON exports include the complete structured model vote list, run id/name, task type, row number, decision type, and timestamps. CSV exports include the same run/item traceability and flatten the three votes into `vote_1_*`, `vote_2_*`, and `vote_3_*` columns for model name, label, confidence, unsafe category, parse error, and rationale.
 Use **Analyze CSV** in Results to recompute metrics from a previous labels export without storing or re-annotating it.
 
 ## Tests

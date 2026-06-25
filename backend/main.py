@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import storage
 from .agreement import analyze_export_csv, calculate_agreement
 from .council import retry_failed_votes, run_council
-from .csv_utils import parse_csv_annotations
+from .csv_utils import parse_csv_annotation_file
 from .model_provider import (
     close_http_client,
     external_calls_disabled,
@@ -116,16 +116,17 @@ async def create_run_from_csv(
     """Create a run and annotate prompts from CSV text."""
 
     try:
-        prompts = parse_csv_annotations(csv_text)
+        parsed = parse_csv_annotation_file(csv_text)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 
     run = storage.create_run(
         name=run_name or source_filename or "CSV annotation batch",
         source_filename=source_filename,
+        task_type=parsed.task_type,
         model_config=current_model_snapshot(),
     )
-    return await run_annotation_batch(prompts, run)
+    return await run_annotation_batch(parsed.prompts, run)
 
 
 @app.post("/api/runs/csv/validate")
@@ -133,10 +134,17 @@ async def validate_annotation_csv(csv_text: str = Body(..., media_type="text/csv
     """Validate CSV input and return a lightweight preview summary."""
 
     try:
-        prompts = parse_csv_annotations(csv_text)
+        parsed = parse_csv_annotation_file(csv_text)
     except (ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
-    return {"valid_rows": len(prompts)}
+    return {
+        "valid_rows": parsed.valid_rows,
+        "task_type": parsed.task_type,
+        "rows_with_response": parsed.rows_with_response,
+        "rows_without_response": parsed.rows_without_response,
+        "skipped_empty_prompt_rows": parsed.skipped_empty_prompt_rows,
+        "mixed_task_warning": parsed.mixed_task_warning,
+    }
 
 
 async def run_annotation_batch(
@@ -374,6 +382,7 @@ def labels_to_csv(labels: List[ExportedLabel]) -> str:
     fieldnames = [
         "run_id",
         "run_name",
+        "task_type",
         "row_number",
         "prompt_id",
         "prompt",
@@ -400,6 +409,7 @@ def labels_to_csv(labels: List[ExportedLabel]) -> str:
         row = {
             "run_id": label.run_id,
             "run_name": label.run_name,
+            "task_type": label.task_type,
             "row_number": "" if label.row_number is None else label.row_number,
             "prompt_id": label.prompt_id,
             "prompt": label.prompt_text or "",

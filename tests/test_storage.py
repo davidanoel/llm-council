@@ -36,6 +36,9 @@ def test_save_load_annotation_and_human_override(tmp_path, monkeypatch):
     exported = storage.export_labels(run_id=run.run_id)
     assert exported[0].label == "unsafe"
     assert exported[0].label_source == "human"
+    assert exported[0].run_id == run.run_id
+    assert exported[0].run_name == "Storage test"
+    assert exported[0].task_type == "prompt_classification"
 
 
 def test_review_queue(tmp_path, monkeypatch):

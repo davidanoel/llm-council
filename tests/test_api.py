@@ -90,6 +90,7 @@ def test_csv_run_annotation_results_and_agreement(client):
     }
     assert data["run"]["name"] == "Unit run"
     assert data["run"]["source_filename"] == "unit.csv"
+    assert data["run"]["task_type"] == "prompt_classification"
     assert data["run"]["total_items"] == 2
 
     runs = client.get("/api/runs")
@@ -122,6 +123,7 @@ def test_response_annotation_is_stored_and_targets_response(client):
 
     exported = client.get(f"/api/runs/{run_id}/export-labels?include_prompt_text=true")
     assert exported.json()[0]["response_text"] == "I cannot help with covert tracking."
+    assert exported.json()[0]["task_type"] == "response_classification"
 
 
 def test_csv_validation_reports_rows_without_annotating(client):
@@ -132,8 +134,31 @@ def test_csv_validation_reports_rows_without_annotating(client):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"valid_rows": 2}
+    assert response.json() == {
+        "valid_rows": 2,
+        "task_type": "prompt_classification",
+        "rows_with_response": 0,
+        "rows_without_response": 2,
+        "skipped_empty_prompt_rows": 0,
+        "mixed_task_warning": None,
+    }
     assert client.get("/api/runs").json() == []
+
+
+def test_csv_validation_reports_mixed_response_rows(client):
+    response = client.post(
+        "/api/runs/csv/validate",
+        content='prompt,response\nfirst prompt,\nsecond prompt,model response\n,\n',
+        headers={"Content-Type": "text/csv"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["valid_rows"] == 2
+    assert response.json()["task_type"] == "mixed"
+    assert response.json()["rows_with_response"] == 1
+    assert response.json()["rows_without_response"] == 1
+    assert response.json()["skipped_empty_prompt_rows"] == 1
+    assert response.json()["mixed_task_warning"]
 
 
 def test_csv_export_human_override_prompt_metadata_and_votes(client):
@@ -165,6 +190,7 @@ def test_csv_export_human_override_prompt_metadata_and_votes(client):
     assert list(rows[0].keys())[:13] == [
         "run_id",
         "run_name",
+        "task_type",
         "row_number",
         "prompt_id",
         "prompt",
@@ -175,7 +201,6 @@ def test_csv_export_human_override_prompt_metadata_and_votes(client):
         "confidence",
         "unsafe_category",
         "human_review_rationale",
-        "created_at",
     ]
     for index in range(1, 4):
         assert f"vote_{index}_model" in rows[0]
@@ -184,6 +209,7 @@ def test_csv_export_human_override_prompt_metadata_and_votes(client):
         assert f"vote_{index}_rationale" in rows[0]
     assert rows[0]["run_id"] == run_id
     assert rows[0]["run_name"] == "Unit run"
+    assert rows[0]["task_type"] == "prompt_classification"
     assert rows[0]["row_number"] == "1"
     assert rows[0]["prompt_id"] == "p1"
     assert rows[0]["prompt"] == 'Review "quoted" fraud analytics, safely.'

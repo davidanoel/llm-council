@@ -303,6 +303,7 @@ export default function ResultsView({
             </form>
             <div className="run-meta">
               <span>Status: <strong>{selectedRun.status}</strong></span>
+              <span>Task: <strong>{formatTaskType(selectedRun.task_type)}</strong></span>
               <span>Completed: <strong>{selectedRun.completed_items}/{selectedRun.total_items}</strong></span>
               <span>Provider failed: <strong>{selectedRun.provider_failed}</strong></span>
               <span>Created: <strong>{selectedRun.created_at}</strong></span>
@@ -416,4 +417,8 @@ function formatPercent(value) {
 
 function formatRatio(count, total) {
   return total ? `${count} / ${total} (${formatPercent(count / total)})` : '0 / 0';
+}
+
+function formatTaskType(taskType) {
+  return (taskType || '').replaceAll('_', ' ');
 }

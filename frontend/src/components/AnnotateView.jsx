@@ -67,14 +67,25 @@ export default function AnnotateView({ onComplete }) {
             <label className="run-name-field">Run name<input value={runName} onChange={(event) => setRunName(event.target.value)} /></label>
             <div className="validation-summary">
               <strong>{validation.valid_rows.toLocaleString()} valid rows</strong>
+              <span>{formatTaskType(validation.task_type)}</span>
               <button type="button" onClick={runCsv}>Run annotation</button>
             </div>
+            <div className="validation-details">
+              <span>Responses: <strong>{validation.rows_with_response}</strong></span>
+              <span>Prompt only: <strong>{validation.rows_without_response}</strong></span>
+              <span>Skipped empty prompts: <strong>{validation.skipped_empty_prompt_rows}</strong></span>
+            </div>
+            {validation.mixed_task_warning && <p className="warning-text">{validation.mixed_task_warning}</p>}
           </>
         )}
         {summary && <BatchSummary summary={summary} />}
       </section>
     </section>
   );
+}
+
+function formatTaskType(taskType) {
+  return (taskType || '').replaceAll('_', ' ');
 }
 
 function BatchSummary({ summary }) {

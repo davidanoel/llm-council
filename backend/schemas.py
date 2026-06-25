@@ -26,6 +26,7 @@ UnsafeCategory = Literal[
     "none",
 ]
 DecisionType = Literal["auto_safe", "auto_unsafe", "human_review"]
+TaskType = Literal["prompt_classification", "response_classification", "mixed"]
 
 
 class AnnotationRequest(BaseModel):
@@ -127,6 +128,7 @@ class RunSummary(BaseModel):
     run_id: str
     name: str
     source_filename: Optional[str] = None
+    task_type: TaskType = "prompt_classification"
     policy_version: str = "cyber-policy-v1"
     model_config_json: Dict[str, Any] = Field(default_factory=dict)
     decision_rule_version: str = "majority-v1"
@@ -152,6 +154,7 @@ class ExportedLabel(BaseModel):
 
     run_id: str
     run_name: str
+    task_type: TaskType
     row_number: Optional[int] = None
     prompt_id: str
     label: Label
