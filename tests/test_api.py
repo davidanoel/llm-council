@@ -162,29 +162,37 @@ def test_csv_export_human_override_prompt_metadata_and_votes(client):
     assert response.headers["content-type"].startswith("text/csv")
     rows = list(csv.DictReader(StringIO(response.text)))
     assert rows
-    assert list(rows[0].keys())[:10] == [
+    assert list(rows[0].keys())[:13] == [
+        "run_id",
+        "run_name",
+        "row_number",
         "prompt_id",
         "prompt",
         "response",
         "label",
         "label_source",
+        "decision_type",
         "confidence",
         "unsafe_category",
+        "human_review_rationale",
         "created_at",
-        "updated_at",
-        "metadata",
     ]
     for index in range(1, 4):
         assert f"vote_{index}_model" in rows[0]
         assert f"vote_{index}_label" in rows[0]
         assert f"vote_{index}_confidence" in rows[0]
         assert f"vote_{index}_rationale" in rows[0]
+    assert rows[0]["run_id"] == run_id
+    assert rows[0]["run_name"] == "Unit run"
+    assert rows[0]["row_number"] == "1"
     assert rows[0]["prompt_id"] == "p1"
     assert rows[0]["prompt"] == 'Review "quoted" fraud analytics, safely.'
     assert rows[0]["label"] == "unsafe"
     assert rows[0]["label_source"] == "human"
+    assert rows[0]["decision_type"] == "auto_safe"
     assert rows[0]["confidence"] == ""
     assert rows[0]["unsafe_category"] == "phishing"
+    assert rows[0]["human_review_rationale"] == "Override for test."
     assert json.loads(rows[0]["metadata"]) == {"dataset": "unit,csv", "nested": {"x": 1}}
 
     analysis = client.post(
@@ -195,6 +203,17 @@ def test_csv_export_human_override_prompt_metadata_and_votes(client):
     assert analysis.status_code == 200
     assert analysis.json()["unsafe_items"] == 1
     assert analysis.json()["human_review_items"] == 1
+
+
+def test_run_can_be_renamed(client):
+    data = create_csv_run(client, "prompt_id,prompt\np1,How do I kill port 8080?\n")
+    run_id = data["run"]["run_id"]
+
+    renamed = client.request("PATCH", f"/api/runs/{run_id}", json={"name": "Renamed run"})
+
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "Renamed run"
+    assert client.get("/api/runs").json()[0]["name"] == "Renamed run"
 
 
 def test_analyze_csv_rejects_non_export_csv(client):
@@ -251,6 +270,60 @@ def test_provider_failure_counts_completed_human_review_and_provider_failed(tmp_
     assert progress["failed"] == 0
     assert progress["human_review"] == 1
     assert progress["provider_failed"] == 1
+
+
+def test_retry_provider_failures_recomputes_decision(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
+    monkeypatch.setenv("MODEL_PROVIDER", "internal")
+    monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
+    client = ApiClient(app)
+
+    created = client.post(
+        "/api/runs/csv",
+        content="prompt_id,prompt\np1,Explain safe logging practices.\n",
+        headers={"Content-Type": "text/csv"},
+    )
+    run_id = created.json()["run"]["run_id"]
+    assert created.json()["progress"]["provider_failed"] == 1
+
+    monkeypatch.setenv("MODEL_PROVIDER", "mock")
+    response = client.post(f"/api/runs/{run_id}/retry-provider-failures")
+
+    assert response.status_code == 200
+    progress = response.json()["progress"]
+    assert progress["total"] == 1
+    assert progress["completed"] == 1
+    assert progress["auto_safe"] == 1
+    assert progress["provider_failed"] == 0
+
+    item = client.get(f"/api/runs/{run_id}/items").json()[0]
+    assert item["adjudication"]["decision_type"] == "auto_safe"
+    assert all(vote["parse_error"] is None for vote in item["votes"])
+
+
+def test_retry_provider_failures_skips_human_reviewed_items(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "DB_PATH", str(tmp_path / "annotations.db"))
+    monkeypatch.setenv("MODEL_PROVIDER", "internal")
+    monkeypatch.setenv("DISABLE_EXTERNAL_CALLS", "true")
+    client = ApiClient(app)
+
+    created = client.post(
+        "/api/runs/csv",
+        content="prompt_id,prompt\np1,Explain safe logging practices.\n",
+        headers={"Content-Type": "text/csv"},
+    )
+    run_id = created.json()["run"]["run_id"]
+    reviewed = client.post(
+        "/api/human-review",
+        json={"run_id": run_id, "prompt_id": "p1", "label": "safe", "reviewer": "analyst"},
+    )
+    assert reviewed.status_code == 200
+
+    monkeypatch.setenv("MODEL_PROVIDER", "mock")
+    response = client.post(f"/api/runs/{run_id}/retry-provider-failures")
+
+    assert response.status_code == 200
+    assert response.json()["progress"]["total"] == 0
 
 
 def test_app_exception_counts_failed(tmp_path, monkeypatch):

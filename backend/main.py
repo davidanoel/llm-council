@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import storage
 from .agreement import analyze_export_csv, calculate_agreement
-from .council import run_council
+from .council import retry_failed_votes, run_council
 from .csv_utils import parse_csv_annotations
 from .model_provider import (
     close_http_client,
@@ -34,6 +34,7 @@ from .schemas import (
     ExportAnalysis,
     HumanReviewRequest,
     RunSummary,
+    RunUpdate,
     utc_now,
 )
 
@@ -206,6 +207,16 @@ async def get_run(run_id: str) -> RunSummary:
     return run
 
 
+@app.patch("/api/runs/{run_id}", response_model=RunSummary)
+async def update_run(run_id: str, request: RunUpdate) -> RunSummary:
+    """Update editable run fields."""
+
+    try:
+        return storage.rename_run(run_id, request.name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Run not found") from None
+
+
 @app.get("/api/runs/{run_id}/items", response_model=List[AnnotationResult])
 async def list_run_items(run_id: str) -> List[AnnotationResult]:
     """List annotations in one run."""
@@ -213,6 +224,49 @@ async def list_run_items(run_id: str) -> List[AnnotationResult]:
     if not storage.load_run(run_id):
         raise HTTPException(status_code=404, detail="Run not found")
     return storage.list_annotations(run_id=run_id)
+
+
+@app.post("/api/runs/{run_id}/retry-provider-failures", response_model=BatchAnnotationResponse)
+async def retry_run_provider_failures(run_id: str) -> BatchAnnotationResponse:
+    """Retry failed model votes for non-reviewed items in a run."""
+
+    run = storage.load_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    retryable = storage.list_retryable_annotations(run_id)
+    progress = BatchProgress(total=len(retryable))
+    semaphore = asyncio.Semaphore(MAX_PROMPT_CONCURRENCY)
+
+    async def retry_one(annotation: AnnotationResult) -> AnnotationResult | None:
+        nonlocal progress
+        async with semaphore:
+            try:
+                votes, adjudication = await retry_failed_votes(annotation)
+                annotation.votes = votes
+                annotation.adjudication = adjudication
+                stored = storage.save_annotation(
+                    annotation,
+                    run_id=run_id,
+                    row_number=annotation.row_number,
+                )
+                progress.completed += 1
+                if adjudication.decision_type == "auto_safe":
+                    progress.auto_safe += 1
+                elif adjudication.decision_type == "auto_unsafe":
+                    progress.auto_unsafe += 1
+                else:
+                    progress.human_review += 1
+                if all_stage1_votes_provider_failed(stored):
+                    progress.provider_failed += 1
+                return stored
+            except Exception:
+                progress.failed += 1
+                return None
+
+    raw_results = await asyncio.gather(*(retry_one(annotation) for annotation in retryable))
+    results = [result for result in raw_results if result is not None]
+    return BatchAnnotationResponse(results=results, progress=progress, run=storage.load_run(run_id))
 
 
 @app.get("/api/runs/{run_id}/agreement", response_model=AgreementMetrics)
@@ -318,13 +372,18 @@ def labels_to_csv(labels: List[ExportedLabel]) -> str:
 
     output = io.StringIO()
     fieldnames = [
+        "run_id",
+        "run_name",
+        "row_number",
         "prompt_id",
         "prompt",
         "response",
         "label",
         "label_source",
+        "decision_type",
         "confidence",
         "unsafe_category",
+        "human_review_rationale",
         "created_at",
         "updated_at",
         "metadata",
@@ -339,13 +398,18 @@ def labels_to_csv(labels: List[ExportedLabel]) -> str:
     writer.writeheader()
     for label in labels:
         row = {
+            "run_id": label.run_id,
+            "run_name": label.run_name,
+            "row_number": "" if label.row_number is None else label.row_number,
             "prompt_id": label.prompt_id,
             "prompt": label.prompt_text or "",
             "response": label.response_text or "",
             "label": label.label,
             "label_source": label.label_source,
+            "decision_type": label.decision_type,
             "confidence": "" if label.confidence is None else label.confidence,
             "unsafe_category": label.unsafe_category,
+            "human_review_rationale": label.human_review_rationale or "",
             "created_at": label.created_at,
             "updated_at": label.updated_at,
             "metadata": json.dumps(label.metadata, sort_keys=True),

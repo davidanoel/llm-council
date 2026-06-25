@@ -78,6 +78,36 @@ async def run_council(
     return votes, aggregate_votes(prompt_id, votes)
 
 
+async def retry_failed_votes(annotation) -> tuple[List[ModelVote], CouncilDecision]:
+    """Retry only failed votes for one stored annotation, then re-aggregate."""
+
+    provider = get_provider()
+    retry_tasks = []
+    retry_positions = []
+    for index, vote in enumerate(annotation.votes):
+        if vote.parse_error is not None or "provider_failure" in vote.policy_triggers:
+            retry_positions.append(index)
+            retry_tasks.append(
+                provider.annotate(
+                    annotation.prompt_id,
+                    annotation.prompt_text,
+                    vote.model_name,
+                    annotation.metadata,
+                    annotation.response_text,
+                )
+            )
+
+    if retry_tasks:
+        replacements = await asyncio.gather(*retry_tasks)
+        votes = list(annotation.votes)
+        for index, replacement in zip(retry_positions, replacements):
+            votes[index] = replacement
+    else:
+        votes = annotation.votes
+
+    return votes, aggregate_votes(annotation.prompt_id, votes)
+
+
 def human_review(prompt_id: str, reason: str, votes: List[ModelVote]) -> CouncilDecision:
     """Build a human-review decision."""
 

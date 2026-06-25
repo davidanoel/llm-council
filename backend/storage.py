@@ -187,6 +187,23 @@ def complete_run(run_id: str, status: str = "completed") -> RunSummary:
     return run
 
 
+def rename_run(run_id: str, name: str) -> RunSummary:
+    """Rename one run."""
+
+    with closing(connect()) as connection:
+        cursor = connection.execute(
+            "UPDATE runs SET name = ? WHERE run_id = ?",
+            (name.strip(), run_id),
+        )
+        connection.commit()
+    if cursor.rowcount == 0:
+        raise KeyError(f"Run {run_id} not found")
+    run = load_run(run_id)
+    if run is None:
+        raise KeyError(f"Run {run_id} not found")
+    return run
+
+
 def load_run(run_id: str) -> Optional[RunSummary]:
     """Load one run summary."""
 
@@ -402,6 +419,17 @@ def list_annotations(run_id: str) -> List[AnnotationResult]:
         return [build_annotation(connection, row["item_id"]) for row in rows]
 
 
+def list_retryable_annotations(run_id: str) -> List[AnnotationResult]:
+    """List non-reviewed items that have one or more provider/parse failures."""
+
+    return [
+        annotation
+        for annotation in list_annotations(run_id)
+        if not annotation.human_reviews
+        and any(vote_failed(vote) for vote in annotation.votes)
+    ]
+
+
 def build_annotation(connection: sqlite3.Connection, item_id: str) -> AnnotationResult:
     """Build the nested API shape for one item."""
 
@@ -548,6 +576,12 @@ def delete_annotation(prompt_id: str, run_id: str) -> bool:
     return cursor.rowcount > 0
 
 
+def vote_failed(vote: ModelVote) -> bool:
+    """Return whether a model vote failed due to provider or parse issues."""
+
+    return vote.parse_error is not None or "provider_failure" in vote.policy_triggers
+
+
 def export_labels(
     include_prompt_text: bool = False,
     run_id: str = "",
@@ -555,6 +589,9 @@ def export_labels(
     """Export final labels, preferring latest human review."""
 
     exported = []
+    run = load_run(run_id)
+    if run is None:
+        raise KeyError(f"Run {run_id} not found")
     for annotation in list_annotations(run_id=run_id):
         if annotation.human_reviews:
             review = annotation.human_reviews[-1]
@@ -562,21 +599,28 @@ def export_labels(
             source = "human"
             confidence = None
             unsafe_category = review.unsafe_category
+            human_review_rationale = review.rationale
         elif annotation.adjudication:
             label = annotation.adjudication.final_label
             source = "council"
             confidence = annotation.adjudication.confidence
             unsafe_category = annotation.adjudication.unsafe_category
+            human_review_rationale = None
         else:
             continue
 
         exported.append(
             ExportedLabel(
+                run_id=annotation.run_id or run_id,
+                run_name=run.name,
+                row_number=annotation.row_number,
                 prompt_id=annotation.prompt_id,
                 label=label,
                 label_source=source,
+                decision_type=annotation.adjudication.decision_type if annotation.adjudication else "human_review",
                 confidence=confidence,
                 unsafe_category=unsafe_category,
+                human_review_rationale=human_review_rationale,
                 prompt_text=annotation.prompt_text if include_prompt_text else None,
                 response_text=annotation.response_text if include_prompt_text else None,
                 metadata=annotation.metadata,

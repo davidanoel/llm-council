@@ -77,9 +77,9 @@ cd frontend && npm run dev
 
 ## UI Workflow
 
-1. **Annotate:** upload and validate a CSV, name the run, then explicitly start annotation. Single-prompt and JSON input are under Advanced.
+1. **Annotate:** upload and validate a CSV, name the run, then explicitly start annotation.
 2. **Review:** resolve uncertain prompts for the selected run one at a time and save the human label.
-3. **Results:** select a run, view AI agreement, filter completed annotations, inspect votes, and export JSON or CSV.
+3. **Results:** select a run, view AI agreement, retry provider failures, inspect votes, and export JSON or CSV.
 
 ## CSV Input
 
@@ -106,7 +106,9 @@ Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
 - `POST /api/runs/csv`
 - `GET /api/runs`
 - `GET /api/runs/{run_id}`
+- `PATCH /api/runs/{run_id}`
 - `GET /api/runs/{run_id}/items`
+- `POST /api/runs/{run_id}/retry-provider-failures`
 - `GET /api/runs/{run_id}/agreement`
 - `GET /api/runs/{run_id}/review-queue`
 - `POST /api/exports/analyze-csv`
@@ -117,7 +119,7 @@ Synthetic examples are in `data/demo_prompts.csv` and `data/demo_prompts.json`.
 - `GET /api/runs/{run_id}/export-labels.csv`
 
 Exports use the latest human label when present.
-JSON exports include the complete structured model vote list, plus `created_at` and `updated_at`. CSV exports include those same top-level timestamp fields and flatten the three votes into `vote_1_*`, `vote_2_*`, and `vote_3_*` columns for model name, label, confidence, unsafe category, parse error, and rationale.
+JSON exports include the complete structured model vote list, run id/name, row number, decision type, and timestamps. CSV exports include the same run/item traceability and flatten the three votes into `vote_1_*`, `vote_2_*`, and `vote_3_*` columns for model name, label, confidence, unsafe category, parse error, and rationale.
 Use **Analyze CSV** in Results to recompute metrics from a previous labels export without storing or re-annotating it.
 
 ## Tests

@@ -50,8 +50,21 @@ export const api = {
     return request(`/api/runs/${encodeURIComponent(runId)}`);
   },
 
+  updateRun(runId, payload) {
+    return request(`/api/runs/${encodeURIComponent(runId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+
   runItems(runId) {
     return request(`/api/runs/${encodeURIComponent(runId)}/items`);
+  },
+
+  retryProviderFailures(runId) {
+    return request(`/api/runs/${encodeURIComponent(runId)}/retry-provider-failures`, {
+      method: 'POST',
+    });
   },
 
   deleteAnnotation(runId, promptId) {

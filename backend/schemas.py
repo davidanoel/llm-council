@@ -87,7 +87,7 @@ class HumanReviewRequest(BaseModel):
     """Human override for a prompt annotation."""
 
     prompt_id: str
-    run_id: Optional[str] = None
+    run_id: str
     label: HumanLabel
     unsafe_category: UnsafeCategory = "none"
     rationale: Optional[str] = None
@@ -141,14 +141,25 @@ class RunSummary(BaseModel):
     completed_at: Optional[str] = None
 
 
+class RunUpdate(BaseModel):
+    """Editable run fields."""
+
+    name: str = Field(..., min_length=1)
+
+
 class ExportedLabel(BaseModel):
     """Flattened label record for downstream use."""
 
+    run_id: str
+    run_name: str
+    row_number: Optional[int] = None
     prompt_id: str
     label: Label
     label_source: Literal["council", "human"]
+    decision_type: DecisionType
     confidence: Optional[float] = None
     unsafe_category: UnsafeCategory = "none"
+    human_review_rationale: Optional[str] = None
     prompt_text: Optional[str] = None
     response_text: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)

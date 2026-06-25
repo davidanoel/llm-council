@@ -20,6 +20,9 @@ export default function ResultsView({
   const [importedAnalysis, setImportedAnalysis] = useState(null);
   const [status, setStatus] = useState('');
   const [deletingId, setDeletingId] = useState(null);
+  const [runNameDraft, setRunNameDraft] = useState('');
+  const [savingRunName, setSavingRunName] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   const selectedRun = runs.find((run) => run.run_id === selectedRunId);
   const filtered = useMemo(() => annotations.filter((item) => {
@@ -91,6 +94,10 @@ export default function ResultsView({
   }, [refreshVersion, selectedRunId]);
 
   useEffect(() => {
+    setRunNameDraft(selectedRun?.name || '');
+  }, [selectedRun?.name]);
+
+  useEffect(() => {
     const handle = setTimeout(() => {
       setSearchQuery(searchInput.trim().toLowerCase());
     }, 180);
@@ -140,6 +147,45 @@ export default function ResultsView({
       setStatus(err.message);
     } finally {
       event.target.value = '';
+    }
+  }
+
+  async function saveRunName(event) {
+    event.preventDefault();
+    if (!selectedRunId || !runNameDraft.trim()) return;
+    try {
+      setSavingRunName(true);
+      const updated = await api.updateRun(selectedRunId, { name: runNameDraft.trim() });
+      setRuns((current) => current.map((run) => (run.run_id === updated.run_id ? updated : run)));
+      setStatus('Run renamed.');
+      onDataChanged();
+    } catch (err) {
+      setStatus(err.message);
+    } finally {
+      setSavingRunName(false);
+    }
+  }
+
+  async function retryProviderFailures() {
+    if (!selectedRunId) return;
+    try {
+      setRetrying(true);
+      const response = await api.retryProviderFailures(selectedRunId);
+      const [items, metrics, runsList] = await Promise.all([
+        api.runItems(selectedRunId),
+        api.runAgreement(selectedRunId),
+        api.listRuns(),
+      ]);
+      setAnnotations(items);
+      setAgreement(metrics);
+      setRuns(runsList);
+      setImportedAnalysis(null);
+      setStatus(`Retried ${response.progress.completed} items; ${response.progress.failed} failed.`);
+      onDataChanged();
+    } catch (err) {
+      setStatus(err.message);
+    } finally {
+      setRetrying(false);
     }
   }
 
@@ -221,6 +267,11 @@ export default function ResultsView({
             <button type="button" className="secondary" disabled={!selectedRunId} onClick={downloadJson}>Export JSON</button>
             <button type="button" className="secondary" disabled={!selectedRunId} onClick={downloadCsv}>Export CSV</button>
             <label className="upload-button">Analyze CSV<input type="file" accept=".csv,text/csv" onChange={analyzeCsv} /></label>
+            {selectedRun?.provider_failed > 0 && (
+              <button type="button" className="secondary" disabled={retrying} onClick={retryProviderFailures}>
+                {retrying ? 'Retrying...' : 'Retry provider failures'}
+              </button>
+            )}
             <button type="button" className="secondary danger-button" disabled={!selectedRunId} onClick={deleteSelectedRun}>Delete run</button>
           </div>
         </div>
@@ -242,11 +293,26 @@ export default function ResultsView({
         </div>
 
         {selectedRun && (
-          <div className="run-meta">
-            <span>Status: <strong>{selectedRun.status}</strong></span>
-            <span>Source: <strong>{selectedRun.source_filename || 'n/a'}</strong></span>
-            <span>Models: <strong>{selectedRun.model_config_json?.models?.join(', ') || 'n/a'}</strong></span>
-          </div>
+          <>
+            <form className="run-rename" onSubmit={saveRunName}>
+              <label htmlFor="run-name">Run name</label>
+              <input id="run-name" value={runNameDraft} onChange={(event) => setRunNameDraft(event.target.value)} />
+              <button type="submit" className="secondary" disabled={savingRunName || !runNameDraft.trim()}>
+                {savingRunName ? 'Saving...' : 'Rename'}
+              </button>
+            </form>
+            <div className="run-meta">
+              <span>Status: <strong>{selectedRun.status}</strong></span>
+              <span>Completed: <strong>{selectedRun.completed_items}/{selectedRun.total_items}</strong></span>
+              <span>Provider failed: <strong>{selectedRun.provider_failed}</strong></span>
+              <span>Created: <strong>{selectedRun.created_at}</strong></span>
+              <span>Completed at: <strong>{selectedRun.completed_at || 'n/a'}</strong></span>
+              <span>Source: <strong>{selectedRun.source_filename || 'n/a'}</strong></span>
+              <span>Policy: <strong>{selectedRun.policy_version}</strong></span>
+              <span>Rule: <strong>{selectedRun.decision_rule_version}</strong></span>
+              <span>Models: <strong>{selectedRun.model_config_json?.models?.join(', ') || 'n/a'}</strong></span>
+            </div>
+          </>
         )}
 
         <div className="search-row">
