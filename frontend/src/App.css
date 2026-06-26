@@ -594,6 +594,31 @@ legend {
   font-size: 13px;
 }
 
+.result-browser-controls .active-control {
+  border-color: #24557a;
+  color: #24557a;
+  background: #edf4f8;
+  font-weight: 700;
+}
+
+.active-filter-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: -2px 0 10px;
+  color: #607080;
+  font-size: 12px;
+}
+
+.active-filter-row strong {
+  padding: 3px 7px;
+  border: 1px solid #b9c7d3;
+  border-radius: 4px;
+  background: #f8fafb;
+  color: #334e68;
+}
+
 .compact-filters {
   margin: 12px 0;
 }

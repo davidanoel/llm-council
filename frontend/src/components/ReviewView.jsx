@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { AnnotationContent, Badge, DecisionSummary, VoteDetails } from './AnnotationDetails';
 import HumanLabelForm from './HumanLabelForm';
@@ -9,6 +9,8 @@ export default function ReviewView({ refreshVersion, selectedRunId, onSaved }) {
   const [index, setIndex] = useState(0);
   const [reasonFilter, setReasonFilter] = useState('all');
   const [status, setStatus] = useState('');
+  const indexRef = useRef(0);
+  const scopeRef = useRef({ selectedRunId: null, reasonFilter: 'all' });
   const current = queue[index];
 
   const voteCounts = useMemo(() => {
@@ -36,18 +38,31 @@ export default function ReviewView({ refreshVersion, selectedRunId, onSaved }) {
   }, [selectedRunId, reasonFilter]);
 
   useEffect(() => {
+    indexRef.current = index;
+  }, [index]);
+
+  useEffect(() => {
     let active = true;
     if (!selectedRunId) {
       setQueue([]);
       setRun(null);
+      setIndex(0);
+      scopeRef.current = { selectedRunId: null, reasonFilter };
       return () => { active = false; };
     }
+    const scopeChanged = (
+      scopeRef.current.selectedRunId !== selectedRunId
+      || scopeRef.current.reasonFilter !== reasonFilter
+    );
+    const nextIndex = scopeChanged ? 0 : indexRef.current;
+    scopeRef.current = { selectedRunId, reasonFilter };
+
     Promise.all([api.runReviewQueue(selectedRunId, reasonFilter), api.getRun(selectedRunId)])
       .then(([items, runSummary]) => {
         if (active) {
           setQueue(items);
           setRun(runSummary);
-          setIndex(0);
+          setIndex(Math.min(nextIndex, Math.max(items.length - 1, 0)));
         }
       })
       .catch((err) => { if (active) setStatus(err.message); });

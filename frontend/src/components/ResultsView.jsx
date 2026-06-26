@@ -1,8 +1,20 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { AnnotationContent, Badge, DecisionSummary, VoteDetails } from './AnnotationDetails';
 import HumanLabelForm from './HumanLabelForm';
 import { displayLabel, effectiveLabel } from './annotationUtils';
+
+const BROWSER_STATE_KEY = 'cyber-annotation-results-browser';
+const DEFAULT_BROWSER_STATE = {
+  page: 1,
+  pageSize: 100,
+  filter: 'all',
+  reviewReason: 'all',
+  labelSource: 'all',
+  sort: 'row_number',
+  direction: 'asc',
+  searchInput: '',
+};
 
 export default function ResultsView({
   refreshVersion,
@@ -11,17 +23,24 @@ export default function ResultsView({
   onReview,
   onDataChanged,
 }) {
+  const [savedBrowserState] = useState(readBrowserState);
+  const didMountBrowserControls = useRef(false);
   const [runs, setRuns] = useState([]);
   const [annotations, setAnnotations] = useState([]);
-  const [pageInfo, setPageInfo] = useState({ total: 0, page: 1, page_size: 100, total_pages: 0 });
-  const [filter, setFilter] = useState('all');
-  const [reviewReason, setReviewReason] = useState('all');
-  const [labelSource, setLabelSource] = useState('all');
-  const [sort, setSort] = useState('row_number');
-  const [direction, setDirection] = useState('asc');
-  const [pageSize, setPageSize] = useState(100);
-  const [searchInput, setSearchInput] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [pageInfo, setPageInfo] = useState({
+    total: 0,
+    page: savedBrowserState.page,
+    page_size: savedBrowserState.pageSize,
+    total_pages: 0,
+  });
+  const [filter, setFilter] = useState(savedBrowserState.filter);
+  const [reviewReason, setReviewReason] = useState(savedBrowserState.reviewReason);
+  const [labelSource, setLabelSource] = useState(savedBrowserState.labelSource);
+  const [sort, setSort] = useState(savedBrowserState.sort);
+  const [direction, setDirection] = useState(savedBrowserState.direction);
+  const [pageSize, setPageSize] = useState(savedBrowserState.pageSize);
+  const [searchInput, setSearchInput] = useState(savedBrowserState.searchInput);
+  const [searchQuery, setSearchQuery] = useState(savedBrowserState.searchInput.trim().toLowerCase());
   const [selectedId, setSelectedId] = useState(null);
   const [agreement, setAgreement] = useState(null);
   const [exportPreview, setExportPreview] = useState(null);
@@ -37,6 +56,16 @@ export default function ResultsView({
 
   const selectedRun = runs.find((run) => run.run_id === selectedRunId);
   const selected = annotations.find((item) => item.prompt_id === selectedId);
+  const visibleStart = pageInfo.total ? ((pageInfo.page - 1) * pageInfo.page_size) + 1 : 0;
+  const visibleEnd = pageInfo.total ? Math.min(pageInfo.page * pageInfo.page_size, pageInfo.total) : 0;
+  const hasActiveBrowserControls = (
+    filter !== 'all'
+    || reviewReason !== 'all'
+    || labelSource !== 'all'
+    || sort !== 'row_number'
+    || direction !== 'asc'
+    || Boolean(searchQuery)
+  );
   const displayedAgreement = importedAnalysis?.agreement || agreement;
   const displayedTotal = importedAnalysis?.total_items ?? exportPreview?.total_items ?? 0;
   const displayedCounts = importedAnalysis ? {
@@ -127,8 +156,25 @@ export default function ResultsView({
   }, [searchInput]);
 
   useEffect(() => {
+    if (!didMountBrowserControls.current) {
+      didMountBrowserControls.current = true;
+      return;
+    }
     setPageInfo((current) => ({ ...current, page: 1 }));
   }, [filter, reviewReason, labelSource, searchQuery, sort, direction, pageSize]);
+
+  useEffect(() => {
+    writeBrowserState({
+      page: pageInfo.page,
+      pageSize,
+      filter,
+      reviewReason,
+      labelSource,
+      sort,
+      direction,
+      searchInput,
+    });
+  }, [pageInfo.page, pageSize, filter, reviewReason, labelSource, sort, direction, searchInput]);
 
   useEffect(() => {
     setOverrideOpen(false);
@@ -324,6 +370,18 @@ export default function ResultsView({
     }
   }
 
+  function resetBrowserControls() {
+    setFilter('all');
+    setReviewReason('all');
+    setLabelSource('all');
+    setSort('row_number');
+    setDirection('asc');
+    setSearchInput('');
+    setSearchQuery('');
+    setPageSize(100);
+    setPageInfo((current) => ({ ...current, page: 1 }));
+  }
+
   function handleResultTableKeyDown(event) {
     if (!annotations.length) return;
 
@@ -349,7 +407,9 @@ export default function ResultsView({
         <div className="results-toolbar">
           <div>
             <h2>Annotation results</h2>
-            <p className="muted">{selectedRun ? selectedRun.name : 'Select a run'} · {annotations.length} shown of {pageInfo.total} matching rows</p>
+            <p className="muted">
+              {selectedRun ? selectedRun.name : 'Select a run'} · showing {visibleStart}-{visibleEnd} of {pageInfo.total} matching rows
+            </p>
           </div>
           <div className="button-row">
             {exportPreview?.unresolved_items > 0 && <button type="button" title="Review unresolved" aria-label="Review unresolved" onClick={onReview}>Review</button>}
@@ -468,19 +528,34 @@ export default function ResultsView({
           {['all', 'safe', 'unsafe', 'needs_human_review', 'failed'].map((value) => (
             <button key={value} type="button" className={filter === value ? 'filter active' : 'filter'} onClick={() => setFilter(value)}>{value === 'all' ? 'All' : displayLabel(value)}</button>
           ))}
-          <select aria-label="Review reason" value={reviewReason} onChange={(event) => setReviewReason(event.target.value)}>
+          <select
+            aria-label="Review reason"
+            className={reviewReason !== 'all' ? 'active-control' : ''}
+            value={reviewReason}
+            onChange={(event) => setReviewReason(event.target.value)}
+          >
             <option value="all">Any reason</option>
             <option value="provider_failure">Provider failure</option>
             <option value="disagreement">Disagreement</option>
             <option value="abstention">Abstention</option>
             <option value="ambiguous">Ambiguous</option>
           </select>
-          <select aria-label="Label source" value={labelSource} onChange={(event) => setLabelSource(event.target.value)}>
+          <select
+            aria-label="Label source"
+            className={labelSource !== 'all' ? 'active-control' : ''}
+            value={labelSource}
+            onChange={(event) => setLabelSource(event.target.value)}
+          >
             <option value="all">Any source</option>
             <option value="ai">AI</option>
             <option value="human">Human</option>
           </select>
-          <select aria-label="Sort" value={sort} onChange={(event) => setSort(event.target.value)}>
+          <select
+            aria-label="Sort"
+            className={sort !== 'row_number' ? 'active-control' : ''}
+            value={sort}
+            onChange={(event) => setSort(event.target.value)}
+          >
             <option value="row_number">Row order</option>
             <option value="prompt_id">Prompt ID</option>
             <option value="updated_at">Updated</option>
@@ -495,7 +570,26 @@ export default function ResultsView({
           >
             {direction === 'asc' ? 'Asc' : 'Desc'}
           </button>
+          <button
+            type="button"
+            className="filter"
+            disabled={!hasActiveBrowserControls}
+            onClick={resetBrowserControls}
+          >
+            Reset
+          </button>
         </div>
+        {hasActiveBrowserControls && (
+          <div className="active-filter-row">
+            <span>Active browser controls</span>
+            {filter !== 'all' && <strong>{displayLabel(filter)}</strong>}
+            {reviewReason !== 'all' && <strong>{formatReason(reviewReason)}</strong>}
+            {labelSource !== 'all' && <strong>{labelSource}</strong>}
+            {sort !== 'row_number' && <strong>sort: {formatReason(sort)}</strong>}
+            {direction !== 'asc' && <strong>desc</strong>}
+            {searchQuery && <strong>search: {searchQuery}</strong>}
+          </div>
+        )}
         <div className="search-row">
           <label htmlFor="results-search" className="search-label">Search prompts</label>
           <input
@@ -509,12 +603,13 @@ export default function ResultsView({
         {status && <div className="alert error">{status}</div>}
         <div className="table-wrap" tabIndex={0} onKeyDown={handleResultTableKeyDown}>
           <table className="results-table">
-            <thead><tr><th>Prompt ID</th><th>Final label</th><th>Source</th><th>Category</th><th>Status</th><th>Reason</th><th>Updated</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Row</th><th>Prompt ID</th><th>Final label</th><th>Source</th><th>Category</th><th>Status</th><th>Reason</th><th>Updated</th><th>Actions</th></tr></thead>
             <tbody>
               {annotations.map((item) => {
                 const review = item.human_reviews?.at(-1);
                 return (
                   <tr key={item.prompt_id} className={selectedId === item.prompt_id ? 'selected-row' : ''} onClick={() => setSelectedId(item.prompt_id)}>
+                    <td>{item.row_number ?? ''}</td>
                     <td>{item.prompt_id}</td>
                     <td><Badge label={effectiveLabel(item)} /></td>
                     <td>{review ? 'human' : 'AI annotators'}</td>
@@ -543,7 +638,7 @@ export default function ResultsView({
         </div>
         <div className="pagination-row">
           <span>
-            Page <strong>{pageInfo.total_pages ? pageInfo.page : 0}</strong> of <strong>{pageInfo.total_pages}</strong>
+            Showing <strong>{visibleStart}-{visibleEnd}</strong> of <strong>{pageInfo.total}</strong> · page <strong>{pageInfo.total_pages ? pageInfo.page : 0}</strong> of <strong>{pageInfo.total_pages}</strong>
           </span>
           <label>
             Rows
@@ -555,20 +650,42 @@ export default function ResultsView({
             <button
               type="button"
               className="secondary compact-button"
+              title="First page"
+              aria-label="First page"
+              disabled={pageInfo.page <= 1}
+              onClick={() => setPageInfo((current) => ({ ...current, page: 1 }))}
+            >
+              «
+            </button>
+            <button
+              type="button"
+              className="secondary compact-button"
               title="Previous page"
+              aria-label="Previous page"
               disabled={pageInfo.page <= 1}
               onClick={() => setPageInfo((current) => ({ ...current, page: Math.max(1, current.page - 1) }))}
             >
-              Prev
+              ‹
             </button>
             <button
               type="button"
               className="secondary compact-button"
               title="Next page"
+              aria-label="Next page"
               disabled={!pageInfo.total_pages || pageInfo.page >= pageInfo.total_pages}
               onClick={() => setPageInfo((current) => ({ ...current, page: Math.min(current.total_pages, current.page + 1) }))}
             >
-              Next
+              ›
+            </button>
+            <button
+              type="button"
+              className="secondary compact-button"
+              title="Last page"
+              aria-label="Last page"
+              disabled={!pageInfo.total_pages || pageInfo.page >= pageInfo.total_pages}
+              onClick={() => setPageInfo((current) => ({ ...current, page: current.total_pages || 1 }))}
+            >
+              »
             </button>
           </div>
         </div>
@@ -645,4 +762,21 @@ function formatTaskType(taskType) {
 
 function formatReason(reasonType) {
   return reasonType === 'none' ? 'none' : (reasonType || '').replaceAll('_', ' ');
+}
+
+function readBrowserState() {
+  try {
+    const raw = window.sessionStorage.getItem(BROWSER_STATE_KEY);
+    return raw ? { ...DEFAULT_BROWSER_STATE, ...JSON.parse(raw) } : DEFAULT_BROWSER_STATE;
+  } catch {
+    return DEFAULT_BROWSER_STATE;
+  }
+}
+
+function writeBrowserState(state) {
+  try {
+    window.sessionStorage.setItem(BROWSER_STATE_KEY, JSON.stringify(state));
+  } catch {
+    // Browser storage is a convenience only.
+  }
 }
