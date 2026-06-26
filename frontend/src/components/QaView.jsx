@@ -93,7 +93,71 @@ export default function QaView({ refreshVersion, selectedRunId, onRunSelected })
             </div>
           </div>
         )}
+
+        {leftQa && (
+          <div className="metric-section">
+            <h3>Calibration</h3>
+            <div className="metrics-grid">
+              <Metric label="Expected-label coverage" value={ratio(leftQa.calibration.expected_label_items, leftQa.calibration.total_items)} />
+              <Metric label="Expected match rate" value={percent(leftQa.calibration.expected_match_rate)} />
+              <Metric label="Mismatches" value={leftQa.calibration.mismatch_items} />
+              <Metric label="Possible false positives" value={leftQa.calibration.possible_false_positive_items} />
+              <Metric label="Possible false negatives" value={leftQa.calibration.possible_false_negative_items} />
+              <Metric label="Human override rate" value={ratio(leftQa.preview.human_reviewed_items, leftQa.preview.total_items)} />
+            </div>
+          </div>
+        )}
       </section>
+
+      {leftQa && (
+        <section className="panel">
+          <h2>Calibration details</h2>
+          <div className="qa-grid">
+            <SmallCountTable title="Unsafe categories" counts={leftQa.calibration.unsafe_category_counts} />
+            <SmallCountTable title="Override directions" counts={leftQa.calibration.override_directions} />
+            <SmallCountTable title="Consensus" counts={leftQa.calibration.consensus_counts} />
+          </div>
+          <h3>Per-model labels</h3>
+          <div className="table-wrap qa-table-wrap">
+            <table>
+              <thead><tr><th>Model</th><th>Safe</th><th>Unsafe</th><th>Review</th></tr></thead>
+              <tbody>
+                {Object.entries(leftQa.calibration.per_model_label_counts).map(([model, counts]) => (
+                  <tr key={model}>
+                    <td>{model}</td>
+                    <td>{counts.safe || 0}</td>
+                    <td>{counts.unsafe || 0}</td>
+                    <td>{counts.needs_human_review || 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <h3>Mismatches</h3>
+          {leftQa.calibration.mismatch_examples.length ? (
+            <div className="table-wrap qa-table-wrap">
+              <table>
+                <thead><tr><th>Row</th><th>Prompt ID</th><th>Expected</th><th>Final</th><th>Source</th><th>Category</th><th>Prompt</th></tr></thead>
+                <tbody>
+                  {leftQa.calibration.mismatch_examples.map((item) => (
+                    <tr key={item.prompt_id}>
+                      <td>{item.row_number || ''}</td>
+                      <td>{item.prompt_id}</td>
+                      <td>{item.expected_label}</td>
+                      <td>{item.final_label}</td>
+                      <td>{item.label_source}</td>
+                      <td>{item.unsafe_category}</td>
+                      <td>{item.response_text || item.prompt_text || ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="muted">No expected-label mismatches found.</p>
+          )}
+        </section>
+      )}
 
       <section className="panel">
         <h2>Compare runs</h2>
@@ -134,16 +198,17 @@ async function loadRunQa(runId, setQa, setStatus) {
     return;
   }
   try {
-    const [run, preview, agreement, labels] = await Promise.all([
+    const [run, preview, agreement, labels, calibration] = await Promise.all([
       api.getRun(runId),
       api.exportPreview(runId),
       api.runAgreement(runId),
       api.exportRunLabels(runId, false),
+      api.runCalibration(runId, true),
     ]);
     const safe = labels.filter((label) => label.label === 'safe').length;
     const unsafe = labels.filter((label) => label.label === 'unsafe').length;
     const unresolved = labels.filter((label) => label.label === 'needs_human_review').length;
-    setQa({ run, preview, agreement, labels, safe, unsafe, unresolved, labelTotal: labels.length });
+    setQa({ run, preview, agreement, calibration, labels, safe, unsafe, unresolved, labelTotal: labels.length });
     setStatus('');
   } catch (err) {
     setQa(null);
@@ -216,6 +281,26 @@ function RunSelect({ label, runs, value, onChange, allowEmpty = false }) {
 
 function Metric({ label, value }) {
   return <div><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function SmallCountTable({ title, counts }) {
+  const entries = Object.entries(counts || {});
+  return (
+    <div>
+      <h3>{title}</h3>
+      {entries.length ? (
+        <table>
+          <tbody>
+            {entries.map(([label, count]) => (
+              <tr key={label}><td>{label.replaceAll('_', ' ')}</td><td>{count}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="muted">None</p>
+      )}
+    </div>
+  );
 }
 
 function ratio(count, total) {

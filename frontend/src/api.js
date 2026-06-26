@@ -116,6 +116,10 @@ export const api = {
     return request(`/api/runs/${encodeURIComponent(runId)}/agreement`);
   },
 
+  runCalibration(runId, includeText = false) {
+    return request(`/api/runs/${encodeURIComponent(runId)}/calibration?include_text=${includeText}`);
+  },
+
   analyzeExportCsv(csvText) {
     return request('/api/exports/analyze-csv', {
       method: 'POST',

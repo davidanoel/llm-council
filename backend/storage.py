@@ -6,12 +6,15 @@ import json
 import os
 import sqlite3
 import uuid
+from collections import Counter, defaultdict
 from contextlib import closing
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .schemas import (
     AnnotationResult,
+    CalibrationMismatch,
+    CalibrationReport,
     CouncilDecision,
     ExportManifest,
     ExportPreview,
@@ -26,6 +29,7 @@ from .schemas import (
     RunSummary,
     SortDirection,
     ItemSort,
+    Label,
     utc_now,
 )
 from .review_reason import classify_review_reason, vote_failed
@@ -577,6 +581,121 @@ def effective_label(annotation: AnnotationResult) -> Optional[str]:
     if annotation.adjudication:
         return annotation.adjudication.final_label
     return None
+
+
+def calibration_report(run_id: str, include_text: bool = False, max_examples: int = 50) -> CalibrationReport:
+    """Build run-level calibration and trust signals."""
+
+    if load_run(run_id) is None:
+        raise KeyError(f"Run {run_id} not found")
+
+    annotations = list_annotations(run_id)
+    expected_total = 0
+    expected_matches = 0
+    mismatch_examples: List[CalibrationMismatch] = []
+    possible_false_positive = 0
+    possible_false_negative = 0
+    unsafe_category_counts = Counter()
+    per_model_counts: dict[str, Counter] = defaultdict(Counter)
+    override_directions = Counter()
+    consensus_counts = Counter()
+
+    for annotation in annotations:
+        final_label = effective_label(annotation)
+        if final_label == "unsafe":
+            unsafe_category_counts[effective_unsafe_category(annotation)] += 1
+
+        for vote in annotation.votes:
+            per_model_counts[vote.model_name][vote.label] += 1
+
+        consensus_counts[consensus_bucket(annotation)] += 1
+
+        if annotation.human_reviews and annotation.adjudication:
+            council_label = annotation.adjudication.final_label
+            human_label = annotation.human_reviews[-1].label
+            override_directions[f"{council_label}_to_{human_label}"] += 1
+
+        expected_label = expected_label_from_metadata(annotation.metadata)
+        if not expected_label or not final_label:
+            continue
+
+        expected_total += 1
+        if expected_label == final_label:
+            expected_matches += 1
+            continue
+
+        if expected_label == "safe" and final_label == "unsafe":
+            possible_false_positive += 1
+        if expected_label == "unsafe" and final_label == "safe":
+            possible_false_negative += 1
+
+        if len(mismatch_examples) < max_examples:
+            mismatch_examples.append(
+                CalibrationMismatch(
+                    prompt_id=annotation.prompt_id,
+                    row_number=annotation.row_number,
+                    expected_label=expected_label,
+                    final_label=final_label,
+                    label_source="human" if annotation.human_reviews else "council",
+                    unsafe_category=effective_unsafe_category(annotation),
+                    prompt_text=annotation.prompt_text if include_text else None,
+                    response_text=annotation.response_text if include_text else None,
+                )
+            )
+
+    return CalibrationReport(
+        run_id=run_id,
+        total_items=len(annotations),
+        expected_label_items=expected_total,
+        expected_match_items=expected_matches,
+        expected_match_rate=round(expected_matches / expected_total, 4) if expected_total else None,
+        mismatch_items=expected_total - expected_matches,
+        possible_false_positive_items=possible_false_positive,
+        possible_false_negative_items=possible_false_negative,
+        mismatch_examples=mismatch_examples,
+        unsafe_category_counts=dict(sorted(unsafe_category_counts.items())),
+        per_model_label_counts={
+            model: {label: counts[label] for label in ("safe", "unsafe", "needs_human_review")}
+            for model, counts in sorted(per_model_counts.items())
+        },
+        override_directions=dict(sorted(override_directions.items())),
+        consensus_counts={
+            "3_0": consensus_counts["3_0"],
+            "2_1": consensus_counts["2_1"],
+            "split_or_abstain": consensus_counts["split_or_abstain"],
+        },
+    )
+
+
+def expected_label_from_metadata(metadata: Dict[str, Any]) -> Optional[Label]:
+    """Return an expected label from metadata when present."""
+
+    raw_label = str(metadata.get("expected_label", "")).strip()
+    return raw_label if raw_label in ("safe", "unsafe", "needs_human_review") else None  # type: ignore[return-value]
+
+
+def effective_unsafe_category(annotation: AnnotationResult) -> str:
+    """Return latest unsafe category for summaries."""
+
+    if annotation.human_reviews:
+        return annotation.human_reviews[-1].unsafe_category
+    if annotation.adjudication:
+        return annotation.adjudication.unsafe_category
+    return "none"
+
+
+def consensus_bucket(annotation: AnnotationResult) -> str:
+    """Bucket model-vote consensus for trust reporting."""
+
+    successful = [vote for vote in annotation.votes if not vote.parse_error]
+    if len(successful) != 3:
+        return "split_or_abstain"
+    labels = Counter(vote.label for vote in successful)
+    if len(labels) == 1:
+        return "3_0"
+    if max(labels.values()) == 2:
+        return "2_1"
+    return "split_or_abstain"
 
 
 def list_retryable_annotations(run_id: str) -> List[AnnotationResult]:

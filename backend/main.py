@@ -31,6 +31,7 @@ from .schemas import (
     BatchAnnotationResponse,
     BatchProgress,
     BatchProgressStatus,
+    CalibrationReport,
     ExportAnalysis,
     ExportManifest,
     ExportPreview,
@@ -547,6 +548,19 @@ async def run_agreement(run_id: str) -> AgreementMetrics:
     if not storage.load_run(run_id):
         raise HTTPException(status_code=404, detail="Run not found")
     return calculate_agreement(storage.list_annotations(run_id=run_id))
+
+
+@app.get("/api/runs/{run_id}/calibration", response_model=CalibrationReport)
+async def run_calibration(
+    run_id: str,
+    include_text: bool = Query(default=False),
+) -> CalibrationReport:
+    """Report calibration and trust signals for one run."""
+
+    try:
+        return storage.calibration_report(run_id=run_id, include_text=include_text)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Run not found") from None
 
 
 @app.post("/api/exports/analyze-csv", response_model=ExportAnalysis)

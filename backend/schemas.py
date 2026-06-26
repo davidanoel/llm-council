@@ -255,6 +255,37 @@ class ExportManifest(BaseModel):
     model_config_json: Dict[str, Any] = Field(default_factory=dict)
 
 
+class CalibrationMismatch(BaseModel):
+    """One expected-label mismatch from a calibration set."""
+
+    prompt_id: str
+    row_number: Optional[int] = None
+    expected_label: Label
+    final_label: Label
+    label_source: Literal["council", "human"]
+    unsafe_category: UnsafeCategory = "none"
+    prompt_text: Optional[str] = None
+    response_text: Optional[str] = None
+
+
+class CalibrationReport(BaseModel):
+    """Run-level trust signals for policy calibration."""
+
+    run_id: str
+    total_items: int
+    expected_label_items: int
+    expected_match_items: int
+    expected_match_rate: Optional[float] = None
+    mismatch_items: int
+    possible_false_positive_items: int
+    possible_false_negative_items: int
+    mismatch_examples: List[CalibrationMismatch] = Field(default_factory=list)
+    unsafe_category_counts: Dict[str, int] = Field(default_factory=dict)
+    per_model_label_counts: Dict[str, Dict[str, int]] = Field(default_factory=dict)
+    override_directions: Dict[str, int] = Field(default_factory=dict)
+    consensus_counts: Dict[str, int] = Field(default_factory=dict)
+
+
 class AgreementMetrics(BaseModel):
     """Dataset-level agreement among successful AI annotator panels."""
 

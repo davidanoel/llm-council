@@ -572,6 +572,20 @@ legend {
   margin-top: 14px;
 }
 
+.qa-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin: 12px 0 18px;
+}
+
+.qa-grid h3,
+.panel>h3 {
+  margin: 12px 0 8px;
+  color: #334e68;
+  font-size: 14px;
+}
+
 .qa-table-wrap {
   max-height: none;
 }
