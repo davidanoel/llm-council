@@ -501,10 +501,6 @@ export default function ResultsView({
               <div><span>Total rows</span><strong>{displayedTotal}</strong></div>
               <div><span>AI labeled</span><strong>{formatRatio(exportPreview?.ai_labeled_items || 0, displayedTotal)}</strong></div>
               <div><span>Human reviewed</span><strong>{formatRatio(displayedCounts.humanReviewed, displayedTotal)}</strong></div>
-              <div><span>Final safe rate</span><strong>{formatRatio(displayedCounts.safe, displayedTotal)}</strong></div>
-              <div><span>Final unsafe rate</span><strong>{formatRatio(displayedCounts.unsafe, displayedTotal)}</strong></div>
-              <div><span>Unresolved review</span><strong>{formatRatio(displayedCounts.unresolved, displayedTotal)}</strong></div>
-              <div><span>Failed rows</span><strong>{formatRatio(displayedCounts.failed, displayedTotal)}</strong></div>
             </div>
           </details>
         )}

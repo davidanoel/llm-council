@@ -85,9 +85,7 @@ export default function QaView({ refreshVersion, selectedRunId, onRunSelected })
               <Metric label="Unresolved review" value={ratio(leftQa.preview.unresolved_items, leftQa.preview.total_items)} />
               <Metric label="Failed rows" value={ratio(leftQa.preview.failed_items, leftQa.preview.total_items)} />
               <Metric label="Provider failures" value={ratio(leftQa.run.provider_failed, leftQa.preview.total_items)} />
-              <Metric label="Safe labels" value={ratio(leftQa.safe, leftQa.labelTotal)} />
               <Metric label="Unsafe labels" value={ratio(leftQa.unsafe, leftQa.labelTotal)} />
-              <Metric label="Unsafe rate" value={percent(leftQa.labelTotal ? leftQa.unsafe / leftQa.labelTotal : null)} />
               <Metric label="Human overrides" value={ratio(leftQa.preview.human_reviewed_items, leftQa.preview.total_items)} />
               <Metric label="Complete panels" value={ratio(leftQa.agreement.complete_items, leftQa.preview.total_items)} />
             </div>
@@ -103,7 +101,6 @@ export default function QaView({ refreshVersion, selectedRunId, onRunSelected })
               <Metric label="Mismatches" value={leftQa.calibration.mismatch_items} />
               <Metric label="Possible false positives" value={leftQa.calibration.possible_false_positive_items} />
               <Metric label="Possible false negatives" value={leftQa.calibration.possible_false_negative_items} />
-              <Metric label="Human override rate" value={ratio(leftQa.preview.human_reviewed_items, leftQa.preview.total_items)} />
             </div>
           </div>
         )}
@@ -115,7 +112,7 @@ export default function QaView({ refreshVersion, selectedRunId, onRunSelected })
           <div className="qa-grid">
             <SmallCountTable title="Unsafe categories" counts={leftQa.calibration.unsafe_category_counts} />
             <SmallCountTable title="Override directions" counts={leftQa.calibration.override_directions} />
-            <SmallCountTable title="Consensus" counts={leftQa.calibration.consensus_counts} />
+            <SmallCountTable title="Consensus" counts={leftQa.calibration.consensus_counts} labels={CONSENSUS_LABELS} />
           </div>
           <h3>Per-model labels</h3>
           <div className="table-wrap qa-table-wrap">
@@ -224,8 +221,6 @@ function compareRows(leftQa, rightQa) {
     countRow('Unresolved review', leftQa.preview.unresolved_items, rightQa.preview.unresolved_items),
     countRow('Failed rows', leftQa.preview.failed_items, rightQa.preview.failed_items),
     countRow('Provider failures', leftQa.run.provider_failed, rightQa.run.provider_failed),
-    countRow('Safe labels', leftQa.safe, rightQa.safe),
-    countRow('Unsafe labels', leftQa.unsafe, rightQa.unsafe),
     rateRow('Unsafe rate', safeRate(leftQa.unsafe, leftQa.labelTotal), safeRate(rightQa.unsafe, rightQa.labelTotal)),
     countRow('Human overrides', leftQa.preview.human_reviewed_items, rightQa.preview.human_reviewed_items),
     countRow('Complete vote panels', leftQa.agreement.complete_items, rightQa.agreement.complete_items),
@@ -283,7 +278,13 @@ function Metric({ label, value }) {
   return <div><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function SmallCountTable({ title, counts }) {
+const CONSENSUS_LABELS = {
+  '3_0': 'All 3 models agreed',
+  '2_1': 'Two models agreed',
+  split_or_abstain: 'Split, abstained, or failed',
+};
+
+function SmallCountTable({ title, counts, labels = {} }) {
   const entries = Object.entries(counts || {});
   return (
     <div>
@@ -292,7 +293,7 @@ function SmallCountTable({ title, counts }) {
         <table>
           <tbody>
             {entries.map(([label, count]) => (
-              <tr key={label}><td>{label.replaceAll('_', ' ')}</td><td>{count}</td></tr>
+              <tr key={label}><td>{labels[label] || label.replaceAll('_', ' ')}</td><td>{count}</td></tr>
             ))}
           </tbody>
         </table>
