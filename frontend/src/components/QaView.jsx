@@ -280,8 +280,9 @@ function Metric({ label, value }) {
 
 const CONSENSUS_LABELS = {
   '3_0': 'All 3 models agreed',
-  '2_1': 'Two models agreed',
-  split_or_abstain: 'Split, abstained, or failed',
+  '2_1': 'Two agreed, one dissented',
+  '2_0_plus_failure_or_abstain': 'Two agreed, one failed/abstained',
+  split_or_abstain: 'Split or insufficient agreement',
 };
 
 function SmallCountTable({ title, counts, labels = {} }) {

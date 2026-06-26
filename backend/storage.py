@@ -662,6 +662,7 @@ def calibration_report(run_id: str, include_text: bool = False, max_examples: in
         consensus_counts={
             "3_0": consensus_counts["3_0"],
             "2_1": consensus_counts["2_1"],
+            "2_0_plus_failure_or_abstain": consensus_counts["2_0_plus_failure_or_abstain"],
             "split_or_abstain": consensus_counts["split_or_abstain"],
         },
     )
@@ -689,6 +690,10 @@ def consensus_bucket(annotation: AnnotationResult) -> str:
 
     successful = [vote for vote in annotation.votes if not vote.parse_error]
     if len(successful) != 3:
+        non_review_successful = [vote for vote in successful if vote.label != "needs_human_review"]
+        labels = Counter(vote.label for vote in non_review_successful)
+        if labels and max(labels.values()) >= 2:
+            return "2_0_plus_failure_or_abstain"
         return "split_or_abstain"
     labels = Counter(vote.label for vote in successful)
     if len(labels) == 1:
