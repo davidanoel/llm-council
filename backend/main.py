@@ -30,6 +30,7 @@ from .schemas import (
     AgreementMetrics,
     BatchAnnotationResponse,
     BatchProgress,
+    BatchProgressStatus,
     ExportAnalysis,
     ExportManifest,
     ExportPreview,
@@ -60,6 +61,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Cybersecurity Prompt Labelling API", lifespan=lifespan)
 MAX_PROMPT_CONCURRENCY = int(os.getenv("MAX_PROMPT_CONCURRENCY", "5"))
+BATCH_PROGRESS: dict[str, BatchProgressStatus] = {}
 
 app.add_middleware(
     CORSMiddleware,
@@ -162,6 +164,54 @@ async def create_run_from_csv(
     return await run_annotation_batch(parsed.prompts, run)
 
 
+@app.post("/api/runs/csv/start", response_model=BatchProgressStatus)
+async def start_run_from_csv(
+    csv_text: str = Body(..., media_type="text/csv"),
+    run_name: str | None = Query(default=None),
+    source_filename: str | None = Query(default=None),
+) -> BatchProgressStatus:
+    """Create a run and annotate CSV rows in the background."""
+
+    try:
+        parsed = parse_csv_annotation_file(csv_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    run = storage.create_run(
+        name=run_name or source_filename or "CSV annotation batch",
+        source_filename=source_filename,
+        task_type=parsed.task_type,
+        model_config=current_model_snapshot(),
+    )
+    status = BatchProgressStatus(
+        run_id=run.run_id,
+        status="running",
+        progress=BatchProgress(total=len(parsed.prompts)),
+        run=run,
+    )
+    BATCH_PROGRESS[run.run_id] = status
+    asyncio.create_task(run_annotation_batch_task(parsed.prompts, run))
+    return status
+
+
+@app.get("/api/runs/{run_id}/progress", response_model=BatchProgressStatus)
+async def get_run_progress(run_id: str) -> BatchProgressStatus:
+    """Return in-process progress for a currently or recently running batch."""
+
+    status = BATCH_PROGRESS.get(run_id)
+    if status:
+        return status
+    run = storage.load_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return BatchProgressStatus(
+        run_id=run_id,
+        status="completed" if run.status == "completed" else "failed",
+        progress=progress_from_run(run),
+        run=run,
+    )
+
+
 @app.post("/api/runs/csv/validate")
 async def validate_annotation_csv(csv_text: str = Body(..., media_type="text/csv")) -> dict:
     """Validate CSV input and return a lightweight preview summary."""
@@ -194,6 +244,13 @@ async def run_annotation_batch(
         nonlocal progress
         index, prompt = index_and_prompt
         async with semaphore:
+            update_progress_status(
+                run.run_id,
+                progress,
+                status="running",
+                current_row=index,
+                current_prompt_id=prompt.prompt_id or f"row_{index}",
+            )
             try:
                 result = await annotate_prompt(prompt, run_id=run.run_id, row_number=index)
                 progress.completed += 1
@@ -208,6 +265,12 @@ async def run_annotation_batch(
                         progress.provider_failed += 1
                 else:
                     progress.failed += 1
+                update_progress_status(
+                    run.run_id,
+                    progress,
+                    status="running",
+                    last_completed_prompt_id=result.prompt_id,
+                )
                 return result
             except Exception as exc:
                 failed = failed_annotation(prompt, run.run_id, index, error=exc)
@@ -216,6 +279,12 @@ async def run_annotation_batch(
                 except Exception:
                     pass
                 progress.failed += 1
+                update_progress_status(
+                    run.run_id,
+                    progress,
+                    status="running",
+                    last_completed_prompt_id=failed.prompt_id,
+                )
                 return failed
 
     raw_results = await asyncio.gather(
@@ -223,7 +292,70 @@ async def run_annotation_batch(
     )
     results = [result for result in raw_results if result is not None]
     run = storage.complete_run(run.run_id, "completed" if progress.failed == 0 else "failed")
+    update_progress_status(
+        run.run_id,
+        progress,
+        status="completed" if progress.failed == 0 else "failed",
+        run=run,
+    )
     return BatchAnnotationResponse(results=results, progress=progress, run=run)
+
+
+async def run_annotation_batch_task(prompts: List[AnnotationRequest], run: RunSummary) -> None:
+    """Run a background batch and keep progress available for polling."""
+
+    try:
+        await run_annotation_batch(prompts, run)
+    except Exception as exc:
+        failed_run = storage.set_run_status(run.run_id, "failed", completed_at=utc_now())
+        current = BATCH_PROGRESS.get(run.run_id)
+        progress = current.progress if current else BatchProgress(total=len(prompts))
+        update_progress_status(
+            run.run_id,
+            progress,
+            status="failed",
+            run=failed_run,
+            error=str(exc),
+        )
+
+
+def update_progress_status(
+    run_id: str,
+    progress: BatchProgress,
+    status: str,
+    run: RunSummary | None = None,
+    current_row: int | None = None,
+    current_prompt_id: str | None = None,
+    last_completed_prompt_id: str | None = None,
+    error: str | None = None,
+) -> None:
+    """Store latest in-memory batch progress."""
+
+    previous = BATCH_PROGRESS.get(run_id)
+    BATCH_PROGRESS[run_id] = BatchProgressStatus(
+        run_id=run_id,
+        status=status,
+        progress=progress,
+        run=run or previous.run if previous else run,
+        current_row=current_row if current_row is not None else (previous.current_row if previous else None),
+        current_prompt_id=current_prompt_id if current_prompt_id is not None else (previous.current_prompt_id if previous else None),
+        last_completed_prompt_id=last_completed_prompt_id if last_completed_prompt_id is not None else (previous.last_completed_prompt_id if previous else None),
+        error=error,
+    )
+
+
+def progress_from_run(run: RunSummary) -> BatchProgress:
+    """Build final progress counters from a stored run summary."""
+
+    return BatchProgress(
+        total=run.total_items,
+        completed=run.completed_items,
+        failed=run.failed_items,
+        auto_safe=run.auto_safe,
+        auto_unsafe=run.auto_unsafe,
+        human_review=run.human_review,
+        provider_failed=run.provider_failed,
+    )
 
 
 def all_stage1_votes_provider_failed(result: AnnotationResult) -> bool:

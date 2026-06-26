@@ -34,6 +34,22 @@ export const api = {
     });
   },
 
+  startCsvRun(csvText, { runName, sourceFilename } = {}) {
+    const params = new URLSearchParams();
+    if (runName) params.set('run_name', runName);
+    if (sourceFilename) params.set('source_filename', sourceFilename);
+    const suffix = params.toString() ? `?${params}` : '';
+    return request(`/api/runs/csv/start${suffix}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/csv' },
+      body: csvText,
+    });
+  },
+
+  runProgress(runId) {
+    return request(`/api/runs/${encodeURIComponent(runId)}/progress`);
+  },
+
   validateCsv(csvText) {
     return request('/api/runs/csv/validate', {
       method: 'POST',

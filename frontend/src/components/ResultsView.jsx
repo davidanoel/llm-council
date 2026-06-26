@@ -484,28 +484,29 @@ export default function ResultsView({
         )}
         {exportPreview && !importedAnalysis && (
           <div className="metric-section">
-            <h3>Run health</h3>
+            <h3>Action summary</h3>
             <div className="metrics-grid">
-              <div><span>Total rows</span><strong>{exportPreview.total_items}</strong></div>
-              <div><span>AI labeled</span><strong>{formatRatio(exportPreview.ai_labeled_items, exportPreview.total_items)}</strong></div>
-              <div><span>Needs review</span><strong>{formatRatio(exportPreview.unresolved_items, exportPreview.total_items)}</strong></div>
-              <div><span>Human reviewed</span><strong>{formatRatio(exportPreview.human_reviewed_items, exportPreview.total_items)}</strong></div>
-              <div><span>Failed</span><strong>{formatRatio(exportPreview.failed_items, exportPreview.total_items)}</strong></div>
               <div><span>Exportable</span><strong>{formatRatio(exportPreview.exportable_items, exportPreview.total_items)}</strong></div>
+              <div><span>Needs review</span><strong>{formatRatio(exportPreview.unresolved_items, exportPreview.total_items)}</strong></div>
+              <div><span>Failed</span><strong>{formatRatio(exportPreview.failed_items, exportPreview.total_items)}</strong></div>
+              <div><span>Safe</span><strong>{formatRatio(exportPreview.safe_items, exportPreview.total_items)}</strong></div>
+              <div><span>Unsafe</span><strong>{formatRatio(exportPreview.unsafe_items, exportPreview.total_items)}</strong></div>
             </div>
           </div>
         )}
         {displayedTotal > 0 && (
-          <div className="metric-section">
-            <h3>Label distribution</h3>
+          <details className="agreement-details">
+            <summary>More run metrics</summary>
             <div className="metrics-grid">
-            <div><span>Final safe rate</span><strong>{formatRatio(displayedCounts.safe, displayedTotal)}</strong></div>
-            <div><span>Final unsafe rate</span><strong>{formatRatio(displayedCounts.unsafe, displayedTotal)}</strong></div>
-              <div><span>Unresolved review</span><strong>{formatRatio(displayedCounts.unresolved, displayedTotal)}</strong></div>
+              <div><span>Total rows</span><strong>{displayedTotal}</strong></div>
+              <div><span>AI labeled</span><strong>{formatRatio(exportPreview?.ai_labeled_items || 0, displayedTotal)}</strong></div>
               <div><span>Human reviewed</span><strong>{formatRatio(displayedCounts.humanReviewed, displayedTotal)}</strong></div>
-            <div><span>Failed rows</span><strong>{formatRatio(displayedCounts.failed, displayedTotal)}</strong></div>
-          </div>
-          </div>
+              <div><span>Final safe rate</span><strong>{formatRatio(displayedCounts.safe, displayedTotal)}</strong></div>
+              <div><span>Final unsafe rate</span><strong>{formatRatio(displayedCounts.unsafe, displayedTotal)}</strong></div>
+              <div><span>Unresolved review</span><strong>{formatRatio(displayedCounts.unresolved, displayedTotal)}</strong></div>
+              <div><span>Failed rows</span><strong>{formatRatio(displayedCounts.failed, displayedTotal)}</strong></div>
+            </div>
+          </details>
         )}
         {displayedAgreement && (
           <details className="agreement-details">

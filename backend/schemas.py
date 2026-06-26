@@ -63,6 +63,19 @@ class BatchAnnotationResponse(BaseModel):
     run: Optional["RunSummary"] = None
 
 
+class BatchProgressStatus(BaseModel):
+    """In-process batch progress for frontend polling."""
+
+    run_id: str
+    status: Literal["running", "completed", "failed"]
+    progress: BatchProgress
+    run: Optional["RunSummary"] = None
+    current_row: Optional[int] = None
+    current_prompt_id: Optional[str] = None
+    last_completed_prompt_id: Optional[str] = None
+    error: Optional[str] = None
+
+
 class ModelVote(BaseModel):
     """One independent model annotation."""
 
